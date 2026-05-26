@@ -1,0 +1,4 @@
+.build/
+NetSpeed.app/
+dist/
+.DS_Store
