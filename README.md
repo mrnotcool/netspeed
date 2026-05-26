@@ -17,7 +17,7 @@ A lightweight macOS menu bar app that displays real-time network upload and down
 ## Build
 
 ```bash
-git clone https://github.com/julianonline/netspeed.git
+git clone https://github.com/mrnotcool/netspeed.git
 cd netspeed
 bash build.sh
 ```
