@@ -31,7 +31,7 @@ final class SpeedView: NSView {
     private let lineH: CGFloat
     private let baselineOffset: CGFloat  // 从行底到字型基线的标准距离
     private let rightPad: CGFloat = 2
-    private let kern: CGFloat = -0.2
+    private let kern: CGFloat = 0.8
 
     override init(frame: NSRect) {
         lineH = ceil(font.capHeight - font.descender)
