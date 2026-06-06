@@ -24,14 +24,14 @@ final class SpeedView: NSView {
     weak var popupMenu: NSMenu?
 
     private let font: NSFont = {
-        if let f = NSFont(name: "SFCompactDisplay-Medium", size: 8.5) { return f }
-        return .monospacedDigitSystemFont(ofSize: 8.5, weight: .medium)
+        if let f = NSFont(name: "SFCompactDisplay-Regular", size: 9) { return f }
+        return .monospacedDigitSystemFont(ofSize: 9, weight: .regular)
     }()
 
     private let lineH: CGFloat
     private let baselineOffset: CGFloat  // 从行底到字型基线的标准距离
     private let rightPad: CGFloat = 2
-    private let kern: CGFloat = 0.8
+    private let kern: CGFloat = 0.25
 
     override init(frame: NSRect) {
         lineH = ceil(font.capHeight - font.descender)
@@ -56,7 +56,7 @@ final class SpeedView: NSView {
 
     override var intrinsicContentSize: NSSize {
         let numAttr: [NSAttributedString.Key: Any] = [.font: font, .kern: kern]
-        let unitAttr: [NSAttributedString.Key: Any] = [.font: font, .kern: 0.8]
+        let unitAttr: [NSAttributedString.Key: Any] = [.font: font, .kern: kern]
 
         func lineWidth(_ text: String) -> CGFloat {
             let parts = text.split(separator: " ", maxSplits: 1)
@@ -64,7 +64,7 @@ final class SpeedView: NSView {
             let unitStr = parts.count > 1 ? String(parts[1]) : ""
             let numW = (numStr as NSString).size(withAttributes: numAttr).width
             let unitW = (unitStr as NSString).size(withAttributes: unitAttr).width
-            return numW + 4 + unitW
+            return numW + 1.5 + unitW
         }
 
         let maxW = max(lineWidth(uploadText), lineWidth(downloadText))
@@ -84,7 +84,7 @@ final class SpeedView: NSView {
             let unitAttr: [NSAttributedString.Key: Any] = [
                 .font: font,
                 .foregroundColor: primaryColor,
-                .kern: 0.8,
+                .kern: kern,
             ]
 
             drawLine(text: uploadText,   lineBottom: lineH, attr: attr, unitAttr: unitAttr)
@@ -99,7 +99,7 @@ final class SpeedView: NSView {
 
         let numSize = (numStr as NSString).size(withAttributes: attr)
         let unitSize = (unitStr as NSString).size(withAttributes: unitAttr)
-        let gap: CGFloat = 4
+        let gap: CGFloat = 1.5
         let totalW = numSize.width + gap + unitSize.width
 
         let x = self.bounds.width - totalW - rightPad
