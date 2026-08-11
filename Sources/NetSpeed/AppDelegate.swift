@@ -119,6 +119,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var timer: Timer?
     private let monitor = NetworkMonitor()
 
+    private var realtimeMenuItems: [NSMenuItem] = []
+    private var monthlyMenuItems: [NSMenuItem] = []
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         registerFontIfNeeded()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -128,22 +131,95 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.view = speedView
 
         let menu = NSMenu()
+        menu.autoenablesItems = false
         menu.delegate = self
-        menu.addItem(withTitle: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(withTitle: "Quit NetSpeed", action: #selector(quitAction), keyEquivalent: "q")
         statusItem.menu = menu
         speedView.popupMenu = menu
 
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        AppNetworkMonitor.shared.startMonitoring()
+
+        // Use RunLoop.main with mode .common so timer continues firing during menu interaction
+        let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.updateDisplay()
         }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+
         updateDisplay()
+    }
+
+    @objc private func dummyAction() {
+        // No-op for informational items
     }
 
     @objc private func updateDisplay() {
         let speed = monitor.readSpeed()
         speedView.set(upload: formatSpeed(speed.upload), download: formatSpeed(speed.download))
+        updateOpenMenuItems()
+    }
+
+    private func updateOpenMenuItems() {
+        guard !realtimeMenuItems.isEmpty else { return }
+
+        let topRealtime = AppNetworkMonitor.shared.topRealtimeApps(limit: 5)
+        for i in 0..<5 {
+            if i < realtimeMenuItems.count {
+                if i < topRealtime.count {
+                    let info = topRealtime[i]
+                    updateMenuItem(realtimeMenuItems[i], appName: info.name, valueStr: formatSpeed(info.bytesPerSec), icon: info.icon)
+                } else {
+                    updateMenuItem(realtimeMenuItems[i], appName: "-", valueStr: "0 KB/s", icon: nil)
+                }
+            }
+        }
+
+        let topMonthly = AppNetworkMonitor.shared.topMonthlyApps(limit: 5)
+        for i in 0..<5 {
+            if i < monthlyMenuItems.count {
+                if i < topMonthly.count {
+                    let info = topMonthly[i]
+                    updateMenuItem(monthlyMenuItems[i], appName: info.name, valueStr: formatBytes(info.totalBytes), icon: info.icon)
+                } else {
+                    updateMenuItem(monthlyMenuItems[i], appName: "-", valueStr: "0 B", icon: nil)
+                }
+            }
+        }
+    }
+
+    private func updateMenuItem(_ item: NSMenuItem, appName: String, valueStr: String, icon: NSImage?) {
+        let displayName: String
+        if appName.count > 13 {
+            displayName = String(appName.prefix(12)) + "…"
+        } else {
+            displayName = appName
+        }
+
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.tabStops = [NSTextTab(textAlignment: .right, location: 180)]
+
+        let attrStr = NSMutableAttributedString()
+
+        let nameAttr: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13, weight: .light),
+            .foregroundColor: NSColor.labelColor,
+            .paragraphStyle: paragraphStyle
+        ]
+        attrStr.append(NSAttributedString(string: displayName, attributes: nameAttr))
+        attrStr.append(NSAttributedString(string: "\t", attributes: [.paragraphStyle: paragraphStyle]))
+
+        let valAttr: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .light),
+            .foregroundColor: NSColor.secondaryLabelColor,
+            .paragraphStyle: paragraphStyle
+        ]
+        attrStr.append(NSAttributedString(string: valueStr, attributes: valAttr))
+
+        item.attributedTitle = attrStr
+
+        let resolvedIcon = icon ?? AppNetworkMonitor.shared.findAppIcon(appName: appName)
+        let iconCopy = resolvedIcon.copy() as! NSImage
+        iconCopy.size = NSSize(width: 16, height: 16)
+        item.image = iconCopy
     }
 
     private func formatSpeed(_ bps: Double) -> String {
@@ -155,6 +231,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return String(format: "%.1f MB/s", bps / 1_000_000)
         } else {
             return String(format: "%.0f KB/s", bps / 1_000)
+        }
+    }
+
+    private func formatBytes(_ bytes: UInt64) -> String {
+        let doubleBytes = Double(bytes)
+        if bytes >= 1_000_000_000_000 {
+            return String(format: "%.2f TB", doubleBytes / 1_000_000_000_000)
+        } else if bytes >= 1_000_000_000 {
+            return String(format: "%.2f GB", doubleBytes / 1_000_000_000)
+        } else if bytes >= 1_000_000 {
+            return String(format: "%.1f MB", doubleBytes / 1_000_000)
+        } else if bytes >= 1_000 {
+            return String(format: "%.0f KB", doubleBytes / 1_000)
+        } else {
+            return "\(bytes) B"
         }
     }
 
@@ -179,6 +270,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         timer?.invalidate()
         timer = nil
+        AppNetworkMonitor.shared.stopMonitoring()
         if let item = statusItem {
             NSStatusBar.system.removeStatusItem(item)
             statusItem = nil
@@ -189,13 +281,93 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 // MARK: - NSMenuDelegate
 extension AppDelegate: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
-        if #available(macOS 13.0, *) {
-            let item = menu.items.first { $0.action == #selector(toggleLaunchAtLogin) }
-            item?.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        } else {
-            let item = menu.items.first { $0.action == #selector(toggleLaunchAtLogin) }
-            item?.isEnabled = false
-            item?.title = "Launch at Login (macOS 13+)"
+        menu.autoenablesItems = false
+        menu.removeAllItems()
+        realtimeMenuItems.removeAll()
+        monthlyMenuItems.removeAll()
+
+        let headerAttr: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: NSColor.secondaryLabelColor,
+            .kern: 0.5
+        ]
+
+        // 1. REALTIME TRAFFIC Header
+        let header1 = NSMenuItem(title: "REALTIME TRAFFIC", action: #selector(dummyAction), keyEquivalent: "")
+        header1.target = self
+        header1.attributedTitle = NSAttributedString(string: "REALTIME TRAFFIC", attributes: headerAttr)
+        header1.isEnabled = true
+        menu.addItem(header1)
+
+        // 实时流量前5名
+        let topRealtime = AppNetworkMonitor.shared.topRealtimeApps(limit: 5)
+        for i in 0..<5 {
+            let item = NSMenuItem(title: "", action: #selector(dummyAction), keyEquivalent: "")
+            item.target = self
+            item.isEnabled = true
+            if i < topRealtime.count {
+                let info = topRealtime[i]
+                updateMenuItem(item, appName: info.name, valueStr: formatSpeed(info.bytesPerSec), icon: info.icon)
+            } else {
+                updateMenuItem(item, appName: "-", valueStr: "0 KB/s", icon: nil)
+            }
+            realtimeMenuItems.append(item)
+            menu.addItem(item)
         }
+
+        // 分隔线
+        menu.addItem(NSMenuItem.separator())
+
+        // 2. 30-DAY TRAFFIC Header
+        let header2 = NSMenuItem(title: "30-DAY TRAFFIC", action: #selector(dummyAction), keyEquivalent: "")
+        header2.target = self
+        header2.attributedTitle = NSAttributedString(string: "30-DAY TRAFFIC", attributes: headerAttr)
+        header2.isEnabled = true
+        menu.addItem(header2)
+
+        // 累计流量前5名
+        let topMonthly = AppNetworkMonitor.shared.topMonthlyApps(limit: 5)
+        for i in 0..<5 {
+            let item = NSMenuItem(title: "", action: #selector(dummyAction), keyEquivalent: "")
+            item.target = self
+            item.isEnabled = true
+            if i < topMonthly.count {
+                let info = topMonthly[i]
+                updateMenuItem(item, appName: info.name, valueStr: formatBytes(info.totalBytes), icon: info.icon)
+            } else {
+                updateMenuItem(item, appName: "-", valueStr: "0 B", icon: nil)
+            }
+            monthlyMenuItems.append(item)
+            menu.addItem(item)
+        }
+
+        // 分隔线
+        menu.addItem(NSMenuItem.separator())
+
+        // Launch at Login
+        let launchItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        launchItem.target = self
+        launchItem.isEnabled = true
+        if #available(macOS 13.0, *) {
+            launchItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        } else {
+            launchItem.isEnabled = false
+            launchItem.title = "Launch at Login (macOS 13+)"
+        }
+        menu.addItem(launchItem)
+
+        // 分隔线
+        menu.addItem(NSMenuItem.separator())
+
+        // Quit NetSpeed
+        let quitItem = NSMenuItem(title: "Quit NetSpeed", action: #selector(quitAction), keyEquivalent: "q")
+        quitItem.target = self
+        quitItem.isEnabled = true
+        menu.addItem(quitItem)
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        realtimeMenuItems.removeAll()
+        monthlyMenuItems.removeAll()
     }
 }
