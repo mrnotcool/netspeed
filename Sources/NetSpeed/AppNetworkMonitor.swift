@@ -81,7 +81,12 @@ final class AppNetworkMonitor {
             for (k, v) in saved {
                 if let val = UInt64(v) {
                     let nameKey = (k == "Browser Helper" || k == "Browser Helper (Renderer)") ? "Dia" : k
-                    usage[nameKey, default: 0] += val
+                    // Fix previous fake accumulated node / daemon historical spikes
+                    if nameKey == "node" && val > 100_000_000_000 {
+                        usage[nameKey] = 0
+                    } else {
+                        usage[nameKey, default: 0] += val
+                    }
                 }
             }
             monthlyUsage = usage
@@ -292,12 +297,13 @@ final class AppNetworkMonitor {
                                 var speedDelta: UInt64 = 0
                                 
                                 if let prev = self.previousProcessBytes[pid] {
-                                    let deltaIn = bytesIn >= prev.inBytes ? bytesIn - prev.inBytes : bytesIn
-                                    let deltaOut = bytesOut >= prev.outBytes ? bytesOut - prev.outBytes : bytesOut
+                                    let deltaIn = bytesIn >= prev.inBytes ? bytesIn - prev.inBytes : 0
+                                    let deltaOut = bytesOut >= prev.outBytes ? bytesOut - prev.outBytes : 0
                                     deltaTotal = deltaIn + deltaOut
                                     speedDelta = deltaTotal
                                 } else {
-                                    deltaTotal = bytesIn + bytesOut
+                                    // First time seeing PID: establish baseline only, do not add historical lifetime bytes!
+                                    deltaTotal = 0
                                     speedDelta = 0
                                 }
                                 
