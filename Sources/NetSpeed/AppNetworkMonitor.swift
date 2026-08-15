@@ -32,10 +32,17 @@ final class AppNetworkMonitor {
     private let defaults = UserDefaults.standard
     private let cycleStartDateKey = "NetSpeed_CycleStartDate"
     private let monthlyUsageKey = "NetSpeed_MonthlyUsage"
+    private let recalibratedKey = "NetSpeed_Recalibrated_V2"
     
     private init() {
         loadMonthlyUsage()
         checkAndResetCycle()
+        
+        // One-time recalibration to clear corrupted development restart inflation
+        if !defaults.bool(forKey: recalibratedKey) {
+            resetCycle(startDate: Date())
+            defaults.set(true, forKey: recalibratedKey)
+        }
     }
     
     func startMonitoring() {
@@ -81,12 +88,7 @@ final class AppNetworkMonitor {
             for (k, v) in saved {
                 if let val = UInt64(v) {
                     let nameKey = (k == "Browser Helper" || k == "Browser Helper (Renderer)") ? "Dia" : k
-                    // Fix previous fake accumulated node / daemon historical spikes
-                    if nameKey == "node" && val > 100_000_000_000 {
-                        usage[nameKey] = 0
-                    } else {
-                        usage[nameKey, default: 0] += val
-                    }
+                    usage[nameKey, default: 0] += val
                 }
             }
             monthlyUsage = usage
