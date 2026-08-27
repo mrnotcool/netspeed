@@ -75,6 +75,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let trafficDashboard = TrafficDashboardViewController()
     private var localClickMonitor: Any?
     private var globalClickMonitor: Any?
+    private let statusItemLeftPadding: CGFloat = 4
+    private let statusItemRightPadding: CGFloat = 1
 
     // 无箭头、纯正 macOS 菜单级液态玻璃悬浮面板
     private lazy var trafficPanel: NSPanel = {
@@ -110,7 +112,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         speedView.translatesAutoresizingMaskIntoConstraints = false
         statusButton.addSubview(speedView)
         NSLayoutConstraint.activate([
-            speedView.centerXAnchor.constraint(equalTo: statusButton.centerXAnchor),
+            speedView.trailingAnchor.constraint(
+                equalTo: statusButton.trailingAnchor,
+                constant: -statusItemRightPadding
+            ),
             speedView.centerYAnchor.constraint(equalTo: statusButton.centerYAnchor),
         ])
         updateStatusItemLength()
@@ -143,7 +148,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateStatusItemLength() {
-        statusItem.length = speedView.intrinsicContentSize.width + 2
+        statusItem.length = speedView.intrinsicContentSize.width
+            + statusItemLeftPadding
+            + statusItemRightPadding
     }
 
     private func toggleTrafficPanel() {
@@ -279,4 +286,3 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 }
-
