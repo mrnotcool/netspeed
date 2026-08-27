@@ -258,14 +258,19 @@ final class AppNetworkMonitor {
             }
         }
         
-        // 6. SF Symbol fallbacks based on process type
+        // 6. Match Surge's app-like treatment for background system processes.
         let symbolName: String
-        if lower.contains("system services") || lower == "kernel_task" || lower == "launchd" {
-            symbolName = "wrench.and.screwdriver"
-        } else if lower.contains("node") || lower.contains("zsh") || lower.contains("bash") || lower.contains("python") || lower.contains("server") {
+        if lower.contains("node") || lower.contains("zsh") || lower.contains("bash") || lower.contains("python") || lower.contains("server") {
             symbolName = "terminal"
         } else {
-            symbolName = "gearshape"
+            let settingsPaths = [
+                "/System/Applications/System Settings.app",
+                "/System/Applications/System Preferences.app",
+            ]
+            if let settingsPath = settingsPaths.first(where: { fileManager.fileExists(atPath: $0) }) {
+                return NSWorkspace.shared.icon(forFile: settingsPath)
+            }
+            symbolName = "gearshape.fill"
         }
         
         if #available(macOS 11.0, *), let symbolImage = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) {

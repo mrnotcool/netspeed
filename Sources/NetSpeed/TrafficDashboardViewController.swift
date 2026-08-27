@@ -1,11 +1,11 @@
 import AppKit
 
 private enum DashboardMetrics {
-    static let width: CGFloat = 332
-    static let height: CGFloat = 520
-    static let horizontalInset: CGFloat = 14
-    static let rowHeight: CGFloat = 25
-    static let rankingRowHeight: CGFloat = 35
+    static let width: CGFloat = 304
+    static let height: CGFloat = 498
+    static let horizontalInset: CGFloat = 13
+    static let rowHeight: CGFloat = 22
+    static let rankingRowHeight: CGFloat = 32
     static let accent = NSColor(calibratedRed: 0.02, green: 0.72, blue: 0.84, alpha: 1)
 }
 
@@ -62,11 +62,11 @@ final class TrafficDashboardViewController: NSViewController {
         let content = NSStackView()
         content.orientation = .vertical
         content.alignment = .leading
-        content.spacing = 6
+        content.spacing = 5
         content.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(content)
 
-        let realtimeTitle = makeLabel("进程与客户端", size: 12.5, weight: .medium, color: .secondaryLabelColor)
+        let realtimeTitle = makeLabel("进程与客户端", size: 11.5, weight: .semibold, color: .secondaryLabelColor)
         content.addArrangedSubview(realtimeTitle)
         content.setCustomSpacing(5, after: realtimeTitle)
 
@@ -81,11 +81,11 @@ final class TrafficDashboardViewController: NSViewController {
 
         let sectionDivider = makeDivider()
         content.addArrangedSubview(sectionDivider)
-        content.setCustomSpacing(10, after: sectionDivider)
+        content.setCustomSpacing(12, after: sectionDivider)
 
         let trafficHeader = NSView()
         trafficHeader.translatesAutoresizingMaskIntoConstraints = false
-        let trafficTitle = makeLabel("流量", size: 12.5, weight: .semibold, color: .secondaryLabelColor)
+        let trafficTitle = makeLabel("流量", size: 11.5, weight: .semibold, color: .secondaryLabelColor)
         trafficTitle.translatesAutoresizingMaskIntoConstraints = false
         rangeControl.translatesAutoresizingMaskIntoConstraints = false
         rangeControl.target = self
@@ -95,13 +95,13 @@ final class TrafficDashboardViewController: NSViewController {
         trafficHeader.addSubview(rangeControl)
         NSLayoutConstraint.activate([
             trafficHeader.widthAnchor.constraint(equalToConstant: DashboardMetrics.width - DashboardMetrics.horizontalInset * 2),
-            trafficHeader.heightAnchor.constraint(equalToConstant: 25),
+            trafficHeader.heightAnchor.constraint(equalToConstant: 23),
             trafficTitle.leadingAnchor.constraint(equalTo: trafficHeader.leadingAnchor),
             trafficTitle.centerYAnchor.constraint(equalTo: trafficHeader.centerYAnchor),
             rangeControl.trailingAnchor.constraint(equalTo: trafficHeader.trailingAnchor),
             rangeControl.centerYAnchor.constraint(equalTo: trafficHeader.centerYAnchor),
-            rangeControl.widthAnchor.constraint(equalToConstant: 112),
-            rangeControl.heightAnchor.constraint(equalToConstant: 24),
+            rangeControl.widthAnchor.constraint(equalToConstant: 104),
+            rangeControl.heightAnchor.constraint(equalToConstant: 22),
         ])
         content.addArrangedSubview(trafficHeader)
 
@@ -109,12 +109,13 @@ final class TrafficDashboardViewController: NSViewController {
         content.addArrangedSubview(chartView)
         NSLayoutConstraint.activate([
             chartView.widthAnchor.constraint(equalToConstant: DashboardMetrics.width - DashboardMetrics.horizontalInset * 2),
-            chartView.heightAnchor.constraint(equalToConstant: 94),
+            chartView.heightAnchor.constraint(equalToConstant: 88),
         ])
+        content.setCustomSpacing(14, after: chartView)
 
-        let rankingTitle = makeLabel("进程与应用", size: 12.5, weight: .semibold, color: .secondaryLabelColor)
+        let rankingTitle = makeLabel("进程与应用", size: 11.5, weight: .semibold, color: .secondaryLabelColor)
         content.addArrangedSubview(rankingTitle)
-        content.setCustomSpacing(3, after: rankingTitle)
+        content.setCustomSpacing(8, after: rankingTitle)
 
         let rankingStack = NSStackView(views: rankingRows)
         rankingStack.orientation = .vertical
@@ -125,8 +126,8 @@ final class TrafficDashboardViewController: NSViewController {
         NSLayoutConstraint.activate([
             content.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: DashboardMetrics.horizontalInset),
             content.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -DashboardMetrics.horizontalInset),
-            content.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
-            content.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
+            content.topAnchor.constraint(equalTo: view.topAnchor, constant: 18),
+            content.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -14),
             realtimeDivider.widthAnchor.constraint(equalTo: content.widthAnchor),
             sectionDivider.widthAnchor.constraint(equalTo: content.widthAnchor),
         ])
@@ -177,57 +178,16 @@ final class TrafficDashboardViewController: NSViewController {
 }
 
 private final class LiquidGlassBackgroundView: NSVisualEffectView {
-    private let tintView = GlassTintView()
-
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         material = .popover
         blendingMode = .behindWindow
         state = .active
         wantsLayer = true
-        layer?.cornerRadius = 18
-        layer?.masksToBounds = true
-
-        tintView.frame = bounds
-        tintView.autoresizingMask = [.width, .height]
-        addSubview(tintView)
+        layer?.backgroundColor = NSColor.clear.cgColor
     }
 
     required init?(coder: NSCoder) { nil }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-
-        let dark = DashboardPalette.isDark(effectiveAppearance)
-        let borderRect = bounds.insetBy(dx: 0.5, dy: 0.5)
-        let border = NSBezierPath(roundedRect: borderRect, xRadius: 17.5, yRadius: 17.5)
-        (dark ? NSColor.white.withAlphaComponent(0.14) : NSColor.white.withAlphaComponent(0.72)).setStroke()
-        border.lineWidth = 1
-        border.stroke()
-
-        let highlight = NSBezierPath()
-        highlight.move(to: NSPoint(x: 18, y: bounds.maxY - 1.5))
-        highlight.line(to: NSPoint(x: bounds.maxX - 18, y: bounds.maxY - 1.5))
-        NSColor.white.withAlphaComponent(dark ? 0.12 : 0.55).setStroke()
-        highlight.lineWidth = 1
-        highlight.stroke()
-    }
-}
-
-private final class GlassTintView: NSView {
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        let dark = DashboardPalette.isDark(effectiveAppearance)
-        let top = dark
-            ? NSColor(calibratedWhite: 0.20, alpha: 0.48)
-            : NSColor.white.withAlphaComponent(0.78)
-        let bottom = dark
-            ? NSColor(calibratedRed: 0.11, green: 0.13, blue: 0.17, alpha: 0.38)
-            : NSColor(calibratedRed: 0.95, green: 0.97, blue: 1.0, alpha: 0.58)
-        NSGradient(starting: top, ending: bottom)?.draw(in: bounds, angle: -90)
-    }
 }
 
 private final class SoftDividerView: NSView {
@@ -301,7 +261,7 @@ private final class SurgeSegmentedControl: NSControl {
             }
 
             let attributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+                .font: NSFont.systemFont(ofSize: 11, weight: .medium),
                 .foregroundColor: color,
             ]
             let size = (label as NSString).size(withAttributes: attributes)
@@ -324,15 +284,15 @@ private final class RealtimeTrafficRowView: NSView {
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.wantsLayer = true
-        iconView.layer?.cornerRadius = 5.5
+        iconView.layer?.cornerRadius = 5
         iconView.layer?.shadowColor = NSColor.black.cgColor
         iconView.layer?.shadowOpacity = 0.10
         iconView.layer?.shadowRadius = 1.5
         iconView.layer?.shadowOffset = NSSize(width: 0, height: -0.5)
-        nameLabel.font = .systemFont(ofSize: 14, weight: .regular)
+        nameLabel.font = .systemFont(ofSize: 13, weight: .regular)
         nameLabel.lineBreakMode = .byTruncatingTail
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
-        valueLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+        valueLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         valueLabel.textColor = .secondaryLabelColor
         valueLabel.alignment = .right
         valueLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -346,9 +306,9 @@ private final class RealtimeTrafficRowView: NSView {
             heightAnchor.constraint(equalToConstant: DashboardMetrics.rowHeight),
             iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 1),
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: 20),
-            iconView.heightAnchor.constraint(equalToConstant: 20),
-            nameLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 8),
+            iconView.widthAnchor.constraint(equalToConstant: 18),
+            iconView.heightAnchor.constraint(equalToConstant: 18),
+            nameLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 7),
             nameLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             valueLabel.leadingAnchor.constraint(greaterThanOrEqualTo: nameLabel.trailingAnchor, constant: 8),
             valueLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -1),
@@ -380,15 +340,15 @@ private final class TrafficRankingRowView: NSView {
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.wantsLayer = true
-        iconView.layer?.cornerRadius = 6
+        iconView.layer?.cornerRadius = 5.5
         iconView.layer?.shadowColor = NSColor.black.cgColor
         iconView.layer?.shadowOpacity = 0.10
         iconView.layer?.shadowRadius = 1.5
         iconView.layer?.shadowOffset = NSSize(width: 0, height: -0.5)
-        nameLabel.font = .systemFont(ofSize: 14, weight: .regular)
+        nameLabel.font = .systemFont(ofSize: 13, weight: .regular)
         nameLabel.lineBreakMode = .byTruncatingTail
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
-        valueLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+        valueLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         valueLabel.alignment = .right
         valueLabel.translatesAutoresizingMaskIntoConstraints = false
         progressView.translatesAutoresizingMaskIntoConstraints = false
@@ -402,18 +362,18 @@ private final class TrafficRankingRowView: NSView {
             widthAnchor.constraint(equalToConstant: DashboardMetrics.width - DashboardMetrics.horizontalInset * 2),
             heightAnchor.constraint(equalToConstant: DashboardMetrics.rankingRowHeight),
             iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 1),
-            iconView.topAnchor.constraint(equalTo: topAnchor, constant: 3),
-            iconView.widthAnchor.constraint(equalToConstant: 22),
-            iconView.heightAnchor.constraint(equalToConstant: 22),
+            iconView.topAnchor.constraint(equalTo: topAnchor, constant: 2),
+            iconView.widthAnchor.constraint(equalToConstant: 20),
+            iconView.heightAnchor.constraint(equalToConstant: 20),
             nameLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 7),
-            nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 3),
+            nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 2),
             valueLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -1),
-            valueLabel.topAnchor.constraint(equalTo: topAnchor, constant: 3),
+            valueLabel.topAnchor.constraint(equalTo: topAnchor, constant: 2),
             valueLabel.leadingAnchor.constraint(greaterThanOrEqualTo: nameLabel.trailingAnchor, constant: 8),
             progressView.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
             progressView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -1),
-            progressView.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 3),
-            progressView.heightAnchor.constraint(equalToConstant: 4),
+            progressView.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2),
+            progressView.heightAnchor.constraint(equalToConstant: 3.5),
         ])
     }
 
@@ -462,26 +422,35 @@ private final class TrafficBarChartView: NSView {
         super.draw(dirtyRect)
         guard !points.isEmpty else { return }
 
-        let plotRect = NSRect(x: 0, y: 19, width: bounds.width - 47, height: bounds.height - 25)
+        let dataRect = NSRect(x: 0, y: 18, width: bounds.width, height: bounds.height - 24)
+        let gridRect = NSRect(x: 0, y: dataRect.minY, width: bounds.width - 45, height: dataRect.height)
         let rawMaximum = points.map(\.totalBytes).max() ?? 0
         let maximum = niceMaximum(max(rawMaximum, 1))
 
-        drawGridLine(y: plotRect.maxY, label: ByteFormatter.axis(maximum), in: plotRect)
-        drawGridLine(y: plotRect.midY, label: ByteFormatter.axis(maximum / 2), in: plotRect)
+        drawGridLine(y: gridRect.maxY, label: ByteFormatter.axis(maximum), in: gridRect)
+        drawGridLine(y: gridRect.midY, label: ByteFormatter.axis(maximum / 2), in: gridRect)
 
-        let slotWidth = plotRect.width / CGFloat(points.count)
+        let slotWidth = dataRect.width / CGFloat(points.count)
         let barWidth = range == .today ? min(6, slotWidth * 0.48) : min(5, slotWidth * 0.5)
+        let firstCenter = dataRect.minX + barWidth / 2
+        let lastCenter = dataRect.maxX - barWidth / 2
         DashboardMetrics.accent.setFill()
 
         for (index, point) in points.enumerated() {
-            let centerX = plotRect.minX + slotWidth * (CGFloat(index) + 0.5)
+            let centerX: CGFloat
+            if points.count == 1 {
+                centerX = dataRect.midX
+            } else {
+                centerX = firstCenter
+                    + (lastCenter - firstCenter) * CGFloat(index) / CGFloat(points.count - 1)
+            }
             let ratio = CGFloat(Double(point.totalBytes) / Double(maximum))
-            let height = point.totalBytes == 0 ? 5 : max(5, plotRect.height * ratio)
-            let rect = NSRect(x: centerX - barWidth / 2, y: plotRect.minY, width: barWidth, height: height)
+            let height = point.totalBytes == 0 ? 5 : max(5, dataRect.height * ratio)
+            let rect = NSRect(x: centerX - barWidth / 2, y: dataRect.minY, width: barWidth, height: height)
             NSBezierPath(roundedRect: rect, xRadius: barWidth / 2, yRadius: barWidth / 2).fill()
         }
 
-        drawXAxis(in: plotRect, slotWidth: slotWidth)
+        drawXAxis(in: dataRect)
     }
 
     private func drawGridLine(y: CGFloat, label: String, in plotRect: NSRect) {
@@ -500,7 +469,7 @@ private final class TrafficBarChartView: NSView {
         (label as NSString).draw(at: NSPoint(x: plotRect.maxX + 7, y: y - 6), withAttributes: attributes)
     }
 
-    private func drawXAxis(in plotRect: NSRect, slotWidth: CGFloat) {
+    private func drawXAxis(in plotRect: NSRect) {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 10),
             .foregroundColor: NSColor.tertiaryLabelColor.withAlphaComponent(0.72),
@@ -515,9 +484,12 @@ private final class TrafficBarChartView: NSView {
         }
 
         for (index, text) in labels {
-            let centerX = plotRect.minX + slotWidth * (CGFloat(index) + 0.5)
+            let denominator = CGFloat(max(points.count - 1, 1))
+            let centerX = plotRect.minX + plotRect.width * CGFloat(index) / denominator
             let size = (text as NSString).size(withAttributes: attributes)
-            (text as NSString).draw(at: NSPoint(x: centerX - size.width / 2, y: 1), withAttributes: attributes)
+            let idealX = centerX - size.width / 2
+            let clampedX = min(max(idealX, plotRect.minX), plotRect.maxX - size.width)
+            (text as NSString).draw(at: NSPoint(x: clampedX, y: 1), withAttributes: attributes)
         }
     }
 
@@ -532,6 +504,7 @@ private final class TrafficBarChartView: NSView {
         else { ceiling = 10 }
         return UInt64(ceiling * magnitude)
     }
+
 }
 
 enum ByteFormatter {
@@ -559,9 +532,27 @@ enum ByteFormatter {
 
     static func axis(_ bytes: UInt64) -> String {
         let value = Double(bytes)
-        if bytes >= 1_000_000_000 { return String(format: "%.0f GB", value / 1_000_000_000) }
-        if bytes >= 1_000_000 { return String(format: "%.0f MB", value / 1_000_000) }
-        if bytes >= 1_000 { return String(format: "%.0f KB", value / 1_000) }
+        if bytes >= 1_000_000_000_000 {
+            let scaled = value / 1_000_000_000_000
+            return formattedAxis(scaled, unit: "TB")
+        }
+        if bytes >= 1_000_000_000 {
+            let scaled = value / 1_000_000_000
+            return formattedAxis(scaled, unit: "GB")
+        }
+        if bytes >= 1_000_000 {
+            let scaled = value / 1_000_000
+            return formattedAxis(scaled, unit: "MB")
+        }
+        if bytes >= 1_000 {
+            let scaled = value / 1_000
+            return formattedAxis(scaled, unit: "KB")
+        }
         return "\(bytes) B"
+    }
+
+    private static func formattedAxis(_ value: Double, unit: String) -> String {
+        let format = value.rounded() == value || value >= 10 ? "%.0f %@" : "%.1f %@"
+        return String(format: format, value, unit)
     }
 }

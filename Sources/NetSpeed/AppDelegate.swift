@@ -146,7 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.animates = true
         popover.contentViewController = trafficDashboard
-        popover.contentSize = NSSize(width: 332, height: 520)
+        popover.contentSize = NSSize(width: 304, height: 498)
 
         speedView.onLeftClick = { [weak self] in
             self?.togglePopover()
