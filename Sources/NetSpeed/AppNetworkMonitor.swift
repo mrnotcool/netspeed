@@ -399,6 +399,16 @@ final class AppNetworkMonitor {
         }
         
         // 6. Match Surge's app-like treatment for background system processes.
+        if lower == "node" {
+            let terminalPaths = [
+                "/System/Applications/Utilities/Terminal.app",
+                "/Applications/Utilities/Terminal.app",
+            ]
+            if let terminalPath = terminalPaths.first(where: { fileManager.fileExists(atPath: $0) }) {
+                return NSWorkspace.shared.icon(forFile: terminalPath)
+            }
+        }
+
         let symbolName: String
         if lower.contains("node") || lower.contains("zsh") || lower.contains("bash") || lower.contains("python") || lower.contains("server") {
             symbolName = "terminal"

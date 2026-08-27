@@ -32,6 +32,18 @@ private enum DashboardPalette {
             ? NSColor.white.withAlphaComponent(0.12)
             : NSColor(calibratedWhite: 0.55, alpha: 0.12)
     }
+
+    static func chartGridLine(_ appearance: NSAppearance) -> NSColor {
+        isDark(appearance)
+            ? NSColor.white.withAlphaComponent(0.24)
+            : NSColor.black.withAlphaComponent(0.18)
+    }
+
+    static func chartAxisLabel(_ appearance: NSAppearance) -> NSColor {
+        isDark(appearance)
+            ? NSColor.white.withAlphaComponent(0.46)
+            : NSColor.black.withAlphaComponent(0.26)
+    }
 }
 
 final class TrafficDashboardViewController: NSViewController {
@@ -190,8 +202,9 @@ private final class LiquidGlassBackgroundView: NSVisualEffectView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        // 使用 hudWindow 材质，大幅提升透明度与背景透视度，呈现轻盈通透的液态玻璃质感
-        material = .hudWindow
+        // This is a text-rich popover, so prefer the semantic popover material's
+        // stronger blur and luminosity adjustment over the highly translucent HUD look.
+        material = .popover
         blendingMode = .behindWindow
         state = .active
         // 使用 maskImage 确保 GPU 级别完美圆角，彻底根除 4 个角的三角形伪影
@@ -484,12 +497,12 @@ private final class TrafficBarChartView: NSView {
         path.line(to: NSPoint(x: plotRect.maxX, y: y))
         path.lineWidth = 1
         path.setLineDash([2, 3], count: 2, phase: 0)
-        DashboardPalette.hairline(effectiveAppearance).setStroke()
+        DashboardPalette.chartGridLine(effectiveAppearance).setStroke()
         path.stroke()
 
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 10),
-            .foregroundColor: NSColor.tertiaryLabelColor.withAlphaComponent(0.72),
+            .foregroundColor: DashboardPalette.chartAxisLabel(effectiveAppearance),
         ]
         let labelSize = (label as NSString).size(withAttributes: attributes)
         let labelPoint = NSPoint(x: bounds.maxX - labelSize.width, y: y - 6)
@@ -499,7 +512,7 @@ private final class TrafficBarChartView: NSView {
     private func drawXAxis(in plotRect: NSRect) {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 10),
-            .foregroundColor: NSColor.tertiaryLabelColor.withAlphaComponent(0.72),
+            .foregroundColor: DashboardPalette.chartAxisLabel(effectiveAppearance),
         ]
 
         let labels: [(Int, String)]

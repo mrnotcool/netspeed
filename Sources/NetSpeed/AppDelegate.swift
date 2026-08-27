@@ -1,4 +1,5 @@
 import Cocoa
+import CoreText
 import ServiceManagement
 
 // MARK: - 两行速度文本视图
@@ -9,8 +10,8 @@ final class SpeedView: NSView {
     var onLeftClick: (() -> Void)?
     var onRightClick: ((NSEvent) -> Void)?
 
-    private let font = NSFont.systemFont(ofSize: 9, weight: .regular)
-    private let lineHeight: CGFloat = 9
+    private let font = NSFont.menuBarFont(ofSize: 9)
+    private let baselineDistance: CGFloat = 9
     private let contentWidth: CGFloat = 45
 
     override init(frame: NSRect) {
@@ -33,7 +34,7 @@ final class SpeedView: NSView {
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: contentWidth, height: lineHeight * 2)
+        NSSize(width: contentWidth, height: NSStatusBar.system.thickness)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -42,23 +43,48 @@ final class SpeedView: NSView {
             // 深色外观使用更高亮纯白，浅色外观使用标准主文字色
             let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             let primaryColor: NSColor = isDark ? NSColor(calibratedWhite: 0.98, alpha: 1.0) : .labelColor
-            let paragraphStyle = NSMutableParagraphStyle()
-            paragraphStyle.alignment = .right
-            paragraphStyle.lineBreakMode = .byClipping
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: font,
                 .foregroundColor: primaryColor,
-                .paragraphStyle: paragraphStyle,
             ]
 
-            drawLine(text: uploadText, lineBottom: lineHeight, attributes: attributes)
-            drawLine(text: downloadText, lineBottom: 0, attributes: attributes)
+            let uploadLine = makeLine(text: uploadText, attributes: attributes)
+            let downloadLine = makeLine(text: downloadText, attributes: attributes)
+            let downloadBounds = glyphBounds(for: downloadLine)
+            let uploadBounds = glyphBounds(for: uploadLine).offsetBy(dx: 0, dy: baselineDistance)
+            let textBounds = downloadBounds.union(uploadBounds)
+            let bottomBaseline = bounds.midY - textBounds.midY
+
+            guard let context = NSGraphicsContext.current?.cgContext else { return }
+            context.saveGState()
+            context.clip(to: bounds)
+            context.textMatrix = .identity
+            draw(line: uploadLine, baseline: bottomBaseline + baselineDistance, in: context)
+            draw(line: downloadLine, baseline: bottomBaseline, in: context)
+            context.restoreGState()
         }
     }
 
-    private func drawLine(text: String, lineBottom: CGFloat, attributes: [NSAttributedString.Key: Any]) {
-        let rect = NSRect(x: 0, y: lineBottom, width: bounds.width, height: lineHeight)
-        (text as NSString).draw(in: rect, withAttributes: attributes)
+    private func makeLine(text: String, attributes: [NSAttributedString.Key: Any]) -> CTLine {
+        CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attributes))
+    }
+
+    private func glyphBounds(for line: CTLine) -> CGRect {
+        let bounds = CTLineGetBoundsWithOptions(line, [.useGlyphPathBounds, .excludeTypographicLeading])
+        guard !bounds.isNull, !bounds.isEmpty else {
+            var ascent: CGFloat = 0
+            var descent: CGFloat = 0
+            var leading: CGFloat = 0
+            let width = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+            return CGRect(x: 0, y: -descent, width: width, height: ascent + descent)
+        }
+        return bounds
+    }
+
+    private func draw(line: CTLine, baseline: CGFloat, in context: CGContext) {
+        let width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+        context.textPosition = CGPoint(x: bounds.maxX - width, y: baseline)
+        CTLineDraw(line, context)
     }
 }
 
@@ -74,7 +100,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var globalClickMonitor: Any?
     private let statusItemLeftPadding: CGFloat = 4
     private let statusItemRightPadding: CGFloat = 1
-    private let statusItemVerticalOffset: CGFloat = -1.25
 
     // 无箭头、纯正 macOS 菜单级液态玻璃悬浮面板
     private lazy var trafficPanel: NSPanel = {
@@ -115,8 +140,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 constant: -statusItemRightPadding
             ),
             speedView.centerYAnchor.constraint(
-                equalTo: statusButton.centerYAnchor,
-                constant: statusItemVerticalOffset
+                equalTo: statusButton.centerYAnchor
             ),
         ])
         updateStatusItemLength()
