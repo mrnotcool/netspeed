@@ -6,6 +6,7 @@ private enum DashboardMetrics {
     static let horizontalInset: CGFloat = 13
     static let rowHeight: CGFloat = 22
     static let rankingRowHeight: CGFloat = 32
+    static let cornerRadius: CGFloat = 18
     static let accent = NSColor(calibratedRed: 0.02, green: 0.72, blue: 0.84, alpha: 1)
 }
 
@@ -185,6 +186,8 @@ private final class LiquidGlassBackgroundView: NSVisualEffectView {
         state = .active
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.cornerRadius = DashboardMetrics.cornerRadius
+        layer?.masksToBounds = true
     }
 
     required init?(coder: NSCoder) { nil }
@@ -427,9 +430,6 @@ private final class TrafficBarChartView: NSView {
         let rawMaximum = points.map(\.totalBytes).max() ?? 0
         let maximum = niceMaximum(max(rawMaximum, 1))
 
-        drawGridLine(y: gridRect.maxY, label: ByteFormatter.axis(maximum), in: gridRect)
-        drawGridLine(y: gridRect.midY, label: ByteFormatter.axis(maximum / 2), in: gridRect)
-
         let slotWidth = dataRect.width / CGFloat(points.count)
         let barWidth = range == .today ? min(6, slotWidth * 0.48) : min(5, slotWidth * 0.5)
         let firstCenter = dataRect.minX + barWidth / 2
@@ -450,6 +450,8 @@ private final class TrafficBarChartView: NSView {
             NSBezierPath(roundedRect: rect, xRadius: barWidth / 2, yRadius: barWidth / 2).fill()
         }
 
+        drawGridLine(y: gridRect.maxY, label: ByteFormatter.axis(maximum), in: gridRect)
+        drawGridLine(y: gridRect.midY, label: ByteFormatter.axis(maximum / 2), in: gridRect)
         drawXAxis(in: dataRect)
     }
 
@@ -466,7 +468,9 @@ private final class TrafficBarChartView: NSView {
             .font: NSFont.systemFont(ofSize: 10),
             .foregroundColor: NSColor.tertiaryLabelColor.withAlphaComponent(0.72),
         ]
-        (label as NSString).draw(at: NSPoint(x: plotRect.maxX + 7, y: y - 6), withAttributes: attributes)
+        let labelSize = (label as NSString).size(withAttributes: attributes)
+        let labelPoint = NSPoint(x: bounds.maxX - labelSize.width, y: y - 6)
+        (label as NSString).draw(at: labelPoint, withAttributes: attributes)
     }
 
     private func drawXAxis(in plotRect: NSRect) {

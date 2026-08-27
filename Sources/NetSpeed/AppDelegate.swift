@@ -123,7 +123,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var timer: Timer?
     private let monitor = NetworkMonitor()
     private let trafficDashboard = TrafficDashboardViewController()
-    private let popover = NSPopover()
+    private var localClickMonitor: Any?
+    private var globalClickMonitor: Any?
+    private lazy var trafficPanel: NSPanel = {
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 304, height: 498),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.contentViewController = trafficDashboard
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = true
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.level = .popUpMenu
+        panel.collectionBehavior = [.canJoinAllSpaces, .transient, .fullScreenAuxiliary]
+        panel.animationBehavior = .utilityWindow
+        panel.isReleasedWhenClosed = false
+        return panel
+    }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         registerFontIfNeeded()
@@ -143,13 +164,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ])
         updateStatusItemLength()
 
-        popover.behavior = .transient
-        popover.animates = true
-        popover.contentViewController = trafficDashboard
-        popover.contentSize = NSSize(width: 304, height: 498)
-
         speedView.onLeftClick = { [weak self] in
-            self?.togglePopover()
+            self?.toggleTrafficPanel()
         }
         speedView.onRightClick = { [weak self] event in
             self?.showContextMenu(with: event)
@@ -171,7 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let speed = monitor.readSpeed()
         speedView.set(upload: formatSpeed(speed.upload), download: formatSpeed(speed.download))
         updateStatusItemLength()
-        if popover.isShown {
+        if trafficPanel.isVisible {
             trafficDashboard.updateContent()
         }
     }
@@ -180,19 +196,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.length = max(28, speedView.intrinsicContentSize.width + 6)
     }
 
-    private func togglePopover() {
-        if popover.isShown {
-            popover.performClose(nil)
+    private func toggleTrafficPanel() {
+        if trafficPanel.isVisible {
+            hideTrafficPanel()
             return
         }
 
         trafficDashboard.updateContent()
-        popover.show(relativeTo: statusButton.bounds, of: statusButton, preferredEdge: .minY)
+        positionTrafficPanel()
+        trafficPanel.orderFrontRegardless()
+        installDismissMonitors()
+    }
+
+    private func positionTrafficPanel() {
+        guard let buttonWindow = statusButton.window else { return }
+        let buttonRectInWindow = statusButton.convert(statusButton.bounds, to: nil)
+        let buttonRect = buttonWindow.convertToScreen(buttonRectInWindow)
+        let panelSize = trafficPanel.frame.size
+        let visibleFrame = (buttonWindow.screen ?? NSScreen.main)?.visibleFrame ?? buttonRect
+
+        var x = buttonRect.midX - panelSize.width / 2
+        x = min(max(x, visibleFrame.minX + 8), visibleFrame.maxX - panelSize.width - 8)
+        var y = buttonRect.minY - panelSize.height - 4
+        if y < visibleFrame.minY + 8 {
+            y = buttonRect.maxY + 4
+        }
+        trafficPanel.setFrameOrigin(NSPoint(x: x, y: y))
+    }
+
+    private func installDismissMonitors() {
+        removeDismissMonitors()
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
+            guard let self, self.trafficPanel.isVisible else { return event }
+            if event.window === self.trafficPanel || event.window === self.statusButton.window {
+                return event
+            }
+            self.hideTrafficPanel()
+            return event
+        }
+
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.hideTrafficPanel()
+            }
+        }
+    }
+
+    private func hideTrafficPanel() {
+        trafficPanel.orderOut(nil)
+        removeDismissMonitors()
+    }
+
+    private func removeDismissMonitors() {
+        if let monitor = localClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            localClickMonitor = nil
+        }
+        if let monitor = globalClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalClickMonitor = nil
+        }
     }
 
     private func showContextMenu(with event: NSEvent) {
-        if popover.isShown {
-            popover.performClose(nil)
+        if trafficPanel.isVisible {
+            hideTrafficPanel()
         }
 
         let menu = NSMenu()
@@ -251,6 +321,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         timer?.invalidate()
         timer = nil
+        hideTrafficPanel()
         AppNetworkMonitor.shared.stopMonitoring()
         if let item = statusItem {
             NSStatusBar.system.removeStatusItem(item)
