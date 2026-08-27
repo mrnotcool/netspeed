@@ -1,20 +1,5 @@
 import Cocoa
-import CoreText
 import ServiceManagement
-
-// MARK: - 注册字体
-private func registerFontIfNeeded() {
-    guard let url = Bundle.main.url(forResource: "SF-Compact-Display-Medium", withExtension: "otf") else {
-        print("Warning: Font file not found in bundle")
-        return
-    }
-    var error: Unmanaged<CFError>?
-    let success = CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error)
-    if !success {
-        let msg = error?.takeRetainedValue().localizedDescription ?? "unknown error"
-        print("Warning: Font registration failed: \(msg)")
-    }
-}
 
 // MARK: - 两行速度文本视图
 final class SpeedView: NSView {
@@ -24,20 +9,11 @@ final class SpeedView: NSView {
     var onLeftClick: (() -> Void)?
     var onRightClick: ((NSEvent) -> Void)?
 
-    private let font: NSFont = {
-        if let f = NSFont(name: "SFCompactDisplay-Medium", size: 8.5) { return f }
-        return .monospacedDigitSystemFont(ofSize: 8.5, weight: .medium)
-    }()
-
-    // 8.5pt 黄金平衡排版
-    private let lineSpacing: CGFloat = 8.2
-    private let bottomBaseline: CGFloat = 1.2
-    private let rightPad: CGFloat = 2
-    private let kern: CGFloat = 0.22
+    private let font = NSFont.systemFont(ofSize: 9, weight: .regular)
+    private let lineHeight: CGFloat = 9
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        registerFontIfNeeded()
     }
     required init?(coder: NSCoder) { nil }
 
@@ -50,16 +26,17 @@ final class SpeedView: NSView {
     }
 
     func set(upload: String, download: String) {
-        uploadText   = upload
+        uploadText = upload
         downloadText = download
         needsDisplay = true
+        invalidateIntrinsicContentSize()
     }
 
     override var intrinsicContentSize: NSSize {
-        let attr: [NSAttributedString.Key: Any] = [.font: font, .kern: kern]
-        let numW  = ("999.9" as NSString).size(withAttributes: attr).width
-        let unitW = ("MB/s"  as NSString).size(withAttributes: attr).width
-        return NSSize(width: ceil(numW + 1.5 + unitW + rightPad), height: 22)
+        let attributes: [NSAttributedString.Key: Any] = [.font: font]
+        let uploadWidth = (uploadText as NSString).size(withAttributes: attributes).width
+        let downloadWidth = (downloadText as NSString).size(withAttributes: attributes).width
+        return NSSize(width: ceil(max(uploadWidth, downloadWidth)), height: lineHeight * 2)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -68,40 +45,23 @@ final class SpeedView: NSView {
             // 深色外观使用更高亮纯白，浅色外观使用标准主文字色
             let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             let primaryColor: NSColor = isDark ? NSColor(calibratedWhite: 0.98, alpha: 1.0) : .labelColor
-
-            let attr: [NSAttributedString.Key: Any] = [
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.alignment = .right
+            paragraphStyle.lineBreakMode = .byClipping
+            let attributes: [NSAttributedString.Key: Any] = [
                 .font: font,
                 .foregroundColor: primaryColor,
-                .kern: kern,
-            ]
-            let unitAttr: [NSAttributedString.Key: Any] = [
-                .font: font,
-                .foregroundColor: primaryColor,
-                .kern: kern,
+                .paragraphStyle: paragraphStyle,
             ]
 
-            // 两行基线垂直下沉，彻底解决太往上偏的问题
-            drawLine(text: uploadText,   baselineY: bottomBaseline + lineSpacing, attr: attr, unitAttr: unitAttr)
-            drawLine(text: downloadText, baselineY: bottomBaseline,               attr: attr, unitAttr: unitAttr)
+            drawLine(text: uploadText, lineBottom: lineHeight, attributes: attributes)
+            drawLine(text: downloadText, lineBottom: 0, attributes: attributes)
         }
     }
 
-    private func drawLine(text: String, baselineY: CGFloat, attr: [NSAttributedString.Key: Any], unitAttr: [NSAttributedString.Key: Any]) {
-        let parts = text.split(separator: " ", maxSplits: 1)
-        let numStr = String(parts.first ?? "0")
-        let unitStr = parts.count > 1 ? String(parts[1]) : ""
-
-        let numSize = (numStr as NSString).size(withAttributes: attr)
-        let unitSize = (unitStr as NSString).size(withAttributes: unitAttr)
-        let gap: CGFloat = 1.5
-        let totalW = numSize.width + gap + unitSize.width
-
-        let x = self.bounds.width - totalW - rightPad
-
-        (numStr as NSString).draw(at: NSPoint(x: x, y: baselineY), withAttributes: attr)
-        if !unitStr.isEmpty {
-            (unitStr as NSString).draw(at: NSPoint(x: x + numSize.width + gap, y: baselineY), withAttributes: unitAttr)
-        }
+    private func drawLine(text: String, lineBottom: CGFloat, attributes: [NSAttributedString.Key: Any]) {
+        let rect = NSRect(x: 0, y: lineBottom, width: bounds.width, height: lineHeight)
+        (text as NSString).draw(in: rect, withAttributes: attributes)
     }
 }
 
@@ -139,7 +99,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        registerFontIfNeeded()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         guard let button = statusItem.button else { return }
         statusButton = button
@@ -153,7 +112,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSLayoutConstraint.activate([
             speedView.centerXAnchor.constraint(equalTo: statusButton.centerXAnchor),
             speedView.centerYAnchor.constraint(equalTo: statusButton.centerYAnchor),
-            speedView.heightAnchor.constraint(equalToConstant: 22)
         ])
         updateStatusItemLength()
 
@@ -178,13 +136,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func updateDisplay() {
         let speed = monitor.readSpeed()
         speedView.set(upload: formatSpeed(speed.upload), download: formatSpeed(speed.download))
+        updateStatusItemLength()
         if trafficPanel.isVisible {
             trafficDashboard.updateContent()
         }
     }
 
     private func updateStatusItemLength() {
-        statusItem.length = max(28, speedView.intrinsicContentSize.width + 6)
+        statusItem.length = speedView.intrinsicContentSize.width + 2
     }
 
     private func toggleTrafficPanel() {
@@ -320,5 +279,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 }
-
 

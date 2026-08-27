@@ -22,10 +22,6 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 cp "$BINARY" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
-FONT_FILE="$PROJECT_DIR/Sources/NetSpeed/SF-Compact-Display-Medium.otf"
-[ -f "$FONT_FILE" ] || { echo "ERROR: Font file not found at $FONT_FILE"; exit 1; }
-cp "$FONT_FILE" "$APP_BUNDLE/Contents/Resources/"
-
 ICON_FILE="$PROJECT_DIR/AppIcon.icns"
 [ -f "$ICON_FILE" ] || { echo "ERROR: AppIcon.icns not found at $ICON_FILE"; exit 1; }
 cp "$ICON_FILE" "$APP_BUNDLE/Contents/Resources/"
