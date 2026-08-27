@@ -5,6 +5,10 @@ let package = Package(
     name: "NetSpeed",
     platforms: [.macOS(.v11)],
     targets: [
-        .executableTarget(name: "NetSpeed", dependencies: [])
+        .executableTarget(
+            name: "NetSpeed",
+            dependencies: [],
+            exclude: ["SF-Compact-Display-Medium.otf"]
+        )
     ]
 )

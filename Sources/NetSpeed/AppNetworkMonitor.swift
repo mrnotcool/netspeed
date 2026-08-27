@@ -14,6 +14,16 @@ struct AppTrafficInfo {
     let totalBytes: UInt64
 }
 
+enum TrafficRange {
+    case today
+    case month
+}
+
+struct TrafficChartPoint {
+    let date: Date
+    let totalBytes: UInt64
+}
+
 final class AppNetworkMonitor {
     static let shared = AppNetworkMonitor()
     
@@ -26,21 +36,30 @@ final class AppNetworkMonitor {
     private(set) var realtimeSpeeds: [String: Double] = [:]
     // App Name -> App Icon
     private(set) var appIcons: [String: NSImage] = [:]
-    // App Name -> 30-Day Cumulative Bytes
+    // App Name -> Current Calendar Month Cumulative Bytes
     private(set) var monthlyUsage: [String: UInt64] = [:]
+    // App Name -> Today's Cumulative Bytes
+    private(set) var dailyUsage: [String: UInt64] = [:]
+    // Local hour start timestamp -> Cumulative Bytes
+    private var hourlyUsage: [String: UInt64] = [:]
     
     private let defaults = UserDefaults.standard
     private let cycleStartDateKey = "NetSpeed_CycleStartDate"
     private let monthlyUsageKey = "NetSpeed_MonthlyUsage"
+    private let monthStartDateKey = "NetSpeed_MonthStartDate_V3"
+    private let dayStartDateKey = "NetSpeed_DayStartDate_V3"
+    private let dailyUsageKey = "NetSpeed_DailyUsage_V3"
+    private let hourlyUsageKey = "NetSpeed_HourlyUsage_V3"
     private let recalibratedKey = "NetSpeed_Recalibrated_V2"
+    private let calendar = Calendar.autoupdatingCurrent
     
     private init() {
-        loadMonthlyUsage()
-        checkAndResetCycle()
+        loadUsage()
+        checkAndResetCycles()
         
         // One-time recalibration to clear corrupted development restart inflation
         if !defaults.bool(forKey: recalibratedKey) {
-            resetCycle(startDate: Date())
+            resetMonth(startDate: startOfMonth(containing: Date()))
             defaults.set(true, forKey: recalibratedKey)
         }
     }
@@ -63,44 +82,94 @@ final class AppNetworkMonitor {
         timer = nil
     }
     
-    private func checkAndResetCycle() {
+    private func checkAndResetCycles() {
         let now = Date()
-        if let startDate = defaults.object(forKey: cycleStartDateKey) as? Date {
-            let elapsed = now.timeIntervalSince(startDate)
-            // 30 days = 30 * 86400 seconds
-            if elapsed >= 30 * 86400 {
-                resetCycle(startDate: now)
+
+        let currentMonthStart = startOfMonth(containing: now)
+        if let savedMonthStart = defaults.object(forKey: monthStartDateKey) as? Date {
+            if !calendar.isDate(savedMonthStart, equalTo: currentMonthStart, toGranularity: .month) {
+                resetMonth(startDate: currentMonthStart)
             }
+        } else if let legacyStart = defaults.object(forKey: cycleStartDateKey) as? Date,
+                  calendar.isDate(legacyStart, equalTo: now, toGranularity: .month) {
+            // Preserve an existing 30-day total when it already belongs to this calendar month.
+            defaults.set(currentMonthStart, forKey: monthStartDateKey)
         } else {
-            resetCycle(startDate: now)
+            resetMonth(startDate: currentMonthStart)
         }
+
+        let currentDayStart = calendar.startOfDay(for: now)
+        if let savedDayStart = defaults.object(forKey: dayStartDateKey) as? Date,
+           calendar.isDate(savedDayStart, inSameDayAs: currentDayStart) {
+            // The current daily bucket is still valid.
+        } else {
+            resetDay(startDate: currentDayStart)
+        }
+
+        pruneHourlyUsage(before: currentMonthStart)
     }
-    
-    private func resetCycle(startDate: Date) {
+
+    private func startOfMonth(containing date: Date) -> Date {
+        let components = calendar.dateComponents([.year, .month], from: date)
+        return calendar.date(from: components) ?? calendar.startOfDay(for: date)
+    }
+
+    private func resetMonth(startDate: Date) {
+        defaults.set(startDate, forKey: monthStartDateKey)
         defaults.set(startDate, forKey: cycleStartDateKey)
         monthlyUsage.removeAll()
         defaults.set([String: String](), forKey: monthlyUsageKey)
+        pruneHourlyUsage(before: startDate)
     }
-    
-    private func loadMonthlyUsage() {
-        if let saved = defaults.dictionary(forKey: monthlyUsageKey) as? [String: String] {
-            var usage: [String: UInt64] = [:]
-            for (k, v) in saved {
-                if let val = UInt64(v) {
-                    let nameKey = (k == "Browser Helper" || k == "Browser Helper (Renderer)") ? "Dia" : k
-                    usage[nameKey, default: 0] += val
-                }
-            }
-            monthlyUsage = usage
+
+    private func resetDay(startDate: Date) {
+        defaults.set(startDate, forKey: dayStartDateKey)
+        dailyUsage.removeAll()
+        defaults.set([String: String](), forKey: dailyUsageKey)
+    }
+
+    private func decodeUsage(forKey key: String) -> [String: UInt64] {
+        guard let saved = defaults.dictionary(forKey: key) as? [String: String] else { return [:] }
+        var usage: [String: UInt64] = [:]
+        for (name, value) in saved {
+            guard let bytes = UInt64(value) else { continue }
+            let normalizedName = (name == "Browser Helper" || name == "Browser Helper (Renderer)") ? "Dia" : name
+            usage[normalizedName, default: 0] += bytes
         }
+        return usage
     }
-    
-    private func saveMonthlyUsage() {
+
+    private func loadUsage() {
+        monthlyUsage = decodeUsage(forKey: monthlyUsageKey)
+        dailyUsage = decodeUsage(forKey: dailyUsageKey)
+        hourlyUsage = decodeUsage(forKey: hourlyUsageKey)
+    }
+
+    private func encodeUsage(_ usage: [String: UInt64], forKey key: String) {
         var toSave: [String: String] = [:]
-        for (k, v) in monthlyUsage {
-            toSave[k] = String(v)
+        for (name, bytes) in usage {
+            toSave[name] = String(bytes)
         }
-        defaults.set(toSave, forKey: monthlyUsageKey)
+        defaults.set(toSave, forKey: key)
+    }
+
+    private func saveUsage() {
+        encodeUsage(monthlyUsage, forKey: monthlyUsageKey)
+        encodeUsage(dailyUsage, forKey: dailyUsageKey)
+        encodeUsage(hourlyUsage, forKey: hourlyUsageKey)
+    }
+
+    private func hourKey(for date: Date) -> String {
+        let hourStart = calendar.dateInterval(of: .hour, for: date)?.start ?? date
+        return String(Int(hourStart.timeIntervalSince1970))
+    }
+
+    private func pruneHourlyUsage(before cutoff: Date) {
+        let cutoffTimestamp = Int(cutoff.timeIntervalSince1970)
+        hourlyUsage = hourlyUsage.filter { key, _ in
+            guard let timestamp = Int(key) else { return false }
+            return timestamp >= cutoffTimestamp
+        }
     }
 
     private func isXiaohongshu(_ name: String) -> Bool {
@@ -191,14 +260,16 @@ final class AppNetworkMonitor {
         
         // 6. SF Symbol fallbacks based on process type
         let symbolName: String
-        if lower.contains("node") || lower.contains("zsh") || lower.contains("bash") || lower.contains("python") || lower.contains("server") {
+        if lower.contains("system services") || lower == "kernel_task" || lower == "launchd" {
+            symbolName = "wrench.and.screwdriver"
+        } else if lower.contains("node") || lower.contains("zsh") || lower.contains("bash") || lower.contains("python") || lower.contains("server") {
             symbolName = "terminal"
         } else {
             symbolName = "gearshape"
         }
         
         if #available(macOS 11.0, *), let symbolImage = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) {
-            return symbolImage
+            return symbolImage.withSymbolConfiguration(.init(pointSize: 16, weight: .regular)) ?? symbolImage
         }
         
         return NSWorkspace.shared.icon(forFileType: NSFileTypeForHFSTypeCode(OSType(kGenericApplicationIcon)))
@@ -324,7 +395,7 @@ final class AppNetworkMonitor {
                 
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self else { return }
-                    self.checkAndResetCycle()
+                    self.checkAndResetCycles()
                     self.previousProcessBytes = currentProcessBytes
                     self.previousTime = now
                     self.realtimeSpeeds = currentRealtimeSpeeds
@@ -338,12 +409,15 @@ final class AppNetworkMonitor {
                     var updatedUsage = false
                     for (appName, delta) in deltasPerApp {
                         if delta > 0 {
+                            self.dailyUsage[appName, default: 0] += delta
                             self.monthlyUsage[appName, default: 0] += delta
                             updatedUsage = true
                         }
                     }
                     if updatedUsage {
-                        self.saveMonthlyUsage()
+                        let totalDelta = deltasPerApp.values.reduce(UInt64(0), +)
+                        self.hourlyUsage[self.hourKey(for: now), default: 0] += totalDelta
+                        self.saveUsage()
                     }
                     self.isPolling = false
                 }
@@ -363,11 +437,49 @@ final class AppNetworkMonitor {
     }
     
     func topMonthlyApps(limit: Int = 5) -> [AppTrafficInfo] {
-        let sorted = monthlyUsage.map { (name, total) in
+        topTrafficApps(range: .month, limit: limit)
+    }
+
+    func topTrafficApps(range: TrafficRange, limit: Int = 5) -> [AppTrafficInfo] {
+        checkAndResetCycles()
+        let source = range == .today ? dailyUsage : monthlyUsage
+        let sorted = source.map { (name, total) in
             let icon = appIcons[name] ?? findAppIcon(appName: name)
             return AppTrafficInfo(name: name, icon: icon, totalBytes: total)
         }.sorted { $0.totalBytes > $1.totalBytes }
-        
+
         return Array(sorted.prefix(limit))
+    }
+
+    func trafficChartPoints(range: TrafficRange) -> [TrafficChartPoint] {
+        checkAndResetCycles()
+        let now = Date()
+
+        switch range {
+        case .today:
+            let start = calendar.startOfDay(for: now)
+            return (0..<24).compactMap { offset in
+                guard let date = calendar.date(byAdding: .hour, value: offset, to: start) else { return nil }
+                return TrafficChartPoint(date: date, totalBytes: hourlyUsage[hourKey(for: date), default: 0])
+            }
+
+        case .month:
+            let start = startOfMonth(containing: now)
+            let dayCount = calendar.range(of: .day, in: .month, for: now)?.count ?? 30
+            return (0..<dayCount).compactMap { dayOffset in
+                guard let dayStart = calendar.date(byAdding: .day, value: dayOffset, to: start),
+                      let nextDay = calendar.date(byAdding: .day, value: 1, to: dayStart) else { return nil }
+
+                let lowerBound = Int(dayStart.timeIntervalSince1970)
+                let upperBound = Int(nextDay.timeIntervalSince1970)
+                let total = hourlyUsage.reduce(UInt64(0)) { partial, entry in
+                    guard let timestamp = Int(entry.key), timestamp >= lowerBound, timestamp < upperBound else {
+                        return partial
+                    }
+                    return partial + entry.value
+                }
+                return TrafficChartPoint(date: dayStart, totalBytes: total)
+            }
+        }
     }
 }

@@ -60,4 +60,6 @@ PLIST
 
 echo "==> Done! App bundle created at $APP_BUNDLE"
 echo "==> Drag NetSpeed.app to your Applications folder or run it from here."
-open "$APP_BUNDLE"
+if [ "${1:-}" != "--no-open" ]; then
+    open "$APP_BUNDLE"
+fi

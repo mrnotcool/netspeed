@@ -1,6 +1,6 @@
 # NetSpeed
 
-A lightweight macOS menu bar app that displays real-time network upload and download speeds, per-app bandwidth usage, and 30-day cumulative traffic statistics.
+A lightweight macOS menu bar app that displays real-time network upload and download speeds, per-app bandwidth usage, and daily or monthly traffic statistics.
 
 ![screenshot](screenshot.png)
 
@@ -9,12 +9,14 @@ A lightweight macOS menu bar app that displays real-time network upload and down
 ## Features
 
 - **Menu Bar Net Speed**: Displays real-time upload and download speeds in the menu bar.
-- **Top 5 Realtime Apps**: Click menu bar icon to view top 5 network-consuming applications in real-time.
-- **Top 5 30-Day Cumulative Traffic**: Tracks 30-day accumulated data usage per app (automatically resets every 30 days).
+- **Surge-Style Traffic Dashboard**: Click the menu bar item to open a native popover with a compact visual hierarchy.
+- **Top 5 Realtime Apps**: View the five applications currently consuming the most bandwidth.
+- **Today and This Month**: Switch between daily and calendar-month application totals.
+- **Traffic History Chart**: Displays hourly bars for today and daily bars for the current month.
 - **High-DPI App Icons & SF Symbols**: Displays sharp application icons with fallback vector SF Symbols for background daemons.
 - **Non-blocking & Asynchronous**: Asynchronous background polling via `nettop` ensures 0ms UI latency.
-- **Live Menu Updating**: Menu stats update continuously in real-time even while the dropdown menu is open.
-- **Launch at Login**: Easily toggle auto-launch at login.
+- **Live Popover Updating**: Speeds, charts, and rankings refresh while the dashboard is open.
+- **Launch at Login**: Right-click the menu bar item to manage launch-at-login or quit the app.
 - **Zero Dependencies**: Pure Swift & Cocoa system frameworks without external dependencies.
 
 ## Build
