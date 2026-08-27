@@ -11,6 +11,7 @@ final class SpeedView: NSView {
 
     private let font = NSFont.systemFont(ofSize: 9, weight: .regular)
     private let lineHeight: CGFloat = 9
+    private let contentWidth: CGFloat = 45
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -29,14 +30,10 @@ final class SpeedView: NSView {
         uploadText = upload
         downloadText = download
         needsDisplay = true
-        invalidateIntrinsicContentSize()
     }
 
     override var intrinsicContentSize: NSSize {
-        let attributes: [NSAttributedString.Key: Any] = [.font: font]
-        let uploadWidth = (uploadText as NSString).size(withAttributes: attributes).width
-        let downloadWidth = (downloadText as NSString).size(withAttributes: attributes).width
-        return NSSize(width: ceil(max(uploadWidth, downloadWidth)), height: lineHeight * 2)
+        NSSize(width: contentWidth, height: lineHeight * 2)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -141,7 +138,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func updateDisplay() {
         let speed = monitor.readSpeed()
         speedView.set(upload: formatSpeed(speed.upload), download: formatSpeed(speed.download))
-        updateStatusItemLength()
         if trafficPanel.isVisible {
             trafficDashboard.updateContent()
         }
