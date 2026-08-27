@@ -6,7 +6,7 @@ private enum DashboardMetrics {
     static let horizontalInset: CGFloat = 13
     static let rowHeight: CGFloat = 22
     static let rankingRowHeight: CGFloat = 32
-    static let cornerRadius: CGFloat = 18
+    static let cornerRadius: CGFloat = 20   // macOS 26 style: larger squircle radius
     static let accent = NSColor(calibratedRed: 0.02, green: 0.72, blue: 0.84, alpha: 1)
 }
 
@@ -67,23 +67,7 @@ final class TrafficDashboardViewController: NSViewController {
         content.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(content)
 
-        let realtimeTitle = makeLabel("进程与客户端", size: 11.5, weight: .semibold, color: .secondaryLabelColor)
-        content.addArrangedSubview(realtimeTitle)
-        content.setCustomSpacing(5, after: realtimeTitle)
-
-        let realtimeDivider = makeDivider()
-        content.addArrangedSubview(realtimeDivider)
-
-        let realtimeStack = NSStackView(views: realtimeRows)
-        realtimeStack.orientation = .vertical
-        realtimeStack.alignment = .leading
-        realtimeStack.spacing = 0
-        content.addArrangedSubview(realtimeStack)
-
-        let sectionDivider = makeDivider()
-        content.addArrangedSubview(sectionDivider)
-        content.setCustomSpacing(12, after: sectionDivider)
-
+        // 1. 流量图表模块
         let trafficHeader = NSView()
         trafficHeader.translatesAutoresizingMaskIntoConstraints = false
         let trafficTitle = makeLabel("流量", size: 11.5, weight: .semibold, color: .secondaryLabelColor)
@@ -114,6 +98,7 @@ final class TrafficDashboardViewController: NSViewController {
         ])
         content.setCustomSpacing(14, after: chartView)
 
+        // 2. 进程与应用（累计流量排行）
         let rankingTitle = makeLabel("进程与应用", size: 11.5, weight: .semibold, color: .secondaryLabelColor)
         content.addArrangedSubview(rankingTitle)
         content.setCustomSpacing(8, after: rankingTitle)
@@ -123,14 +108,24 @@ final class TrafficDashboardViewController: NSViewController {
         rankingStack.alignment = .leading
         rankingStack.spacing = 0
         content.addArrangedSubview(rankingStack)
+        content.setCustomSpacing(18, after: rankingStack)
+
+        // 3. 进程与客户端（实时网速，纯留白间隔无分割线）
+        let realtimeTitle = makeLabel("进程与客户端", size: 11.5, weight: .semibold, color: .secondaryLabelColor)
+        content.addArrangedSubview(realtimeTitle)
+        content.setCustomSpacing(6, after: realtimeTitle)
+
+        let realtimeStack = NSStackView(views: realtimeRows)
+        realtimeStack.orientation = .vertical
+        realtimeStack.alignment = .leading
+        realtimeStack.spacing = 0
+        content.addArrangedSubview(realtimeStack)
 
         NSLayoutConstraint.activate([
             content.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: DashboardMetrics.horizontalInset),
             content.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -DashboardMetrics.horizontalInset),
             content.topAnchor.constraint(equalTo: view.topAnchor, constant: 18),
             content.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -14),
-            realtimeDivider.widthAnchor.constraint(equalTo: content.widthAnchor),
-            sectionDivider.widthAnchor.constraint(equalTo: content.widthAnchor),
         ])
 
         updateContent()
@@ -179,18 +174,46 @@ final class TrafficDashboardViewController: NSViewController {
 }
 
 private final class LiquidGlassBackgroundView: NSVisualEffectView {
+    private static let cornerMask: NSImage = {
+        let r = DashboardMetrics.cornerRadius
+        let size = NSSize(width: r * 2 + 2, height: r * 2 + 2)
+        let img = NSImage(size: size, flipped: false) { rect in
+            NSColor.black.setFill()
+            let path = NSBezierPath(roundedRect: rect, xRadius: r, yRadius: r)
+            path.fill()
+            return true
+        }
+        img.capInsets = NSEdgeInsets(top: r, left: r, bottom: r, right: r)
+        img.resizingMode = .stretch
+        return img
+    }()
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        material = .popover
+        // 使用与右键菜单相同的 .menu 材质，呈现清澈纯正的液态玻璃质感，而非浑浊的亚克力
+        material = .menu
         blendingMode = .behindWindow
         state = .active
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.clear.cgColor
-        layer?.cornerRadius = DashboardMetrics.cornerRadius
-        layer?.masksToBounds = true
+        // 使用 maskImage 确保 GPU 级别完美圆角，彻底根除 4 个角的三角形伪影
+        maskImage = Self.cornerMask
     }
 
     required init?(coder: NSCoder) { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        // 绘制 macOS 菜单级的细微液态玻璃外边缘高光（0.5pt）
+        let isDark = DashboardPalette.isDark(effectiveAppearance)
+        let strokeColor = isDark
+            ? NSColor.white.withAlphaComponent(0.12)
+            : NSColor.white.withAlphaComponent(0.65)
+
+        let insetRect = bounds.insetBy(dx: 0.5, dy: 0.5)
+        let path = NSBezierPath(roundedRect: insetRect, xRadius: DashboardMetrics.cornerRadius - 0.5, yRadius: DashboardMetrics.cornerRadius - 0.5)
+        path.lineWidth = 0.5
+        strokeColor.setStroke()
+        path.stroke()
+    }
 }
 
 private final class SoftDividerView: NSView {

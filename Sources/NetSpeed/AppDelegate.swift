@@ -25,18 +25,17 @@ final class SpeedView: NSView {
     var onRightClick: ((NSEvent) -> Void)?
 
     private let font: NSFont = {
-        if let f = NSFont(name: "SFCompactDisplay-Regular", size: 9) { return f }
-        return .monospacedDigitSystemFont(ofSize: 9, weight: .regular)
+        if let f = NSFont(name: "SFCompactDisplay-Medium", size: 8.5) { return f }
+        return .monospacedDigitSystemFont(ofSize: 8.5, weight: .medium)
     }()
 
-    private let lineH: CGFloat
-    private let baselineOffset: CGFloat  // 从行底到字型基线的标准距离
+    // 8.5pt 黄金平衡排版
+    private let lineSpacing: CGFloat = 8.2
+    private let bottomBaseline: CGFloat = 1.2
     private let rightPad: CGFloat = 2
-    private let kern: CGFloat = 0.25
+    private let kern: CGFloat = 0.22
 
     override init(frame: NSRect) {
-        lineH = ceil(font.capHeight - font.descender)
-        baselineOffset = -font.descender    // descender 为负值，取反即为基线距行底的距离
         super.init(frame: frame)
         registerFontIfNeeded()
     }
@@ -51,33 +50,24 @@ final class SpeedView: NSView {
     }
 
     func set(upload: String, download: String) {
-        uploadText = upload
+        uploadText   = upload
         downloadText = download
         needsDisplay = true
-        invalidateIntrinsicContentSize()
     }
 
     override var intrinsicContentSize: NSSize {
-        let numAttr: [NSAttributedString.Key: Any] = [.font: font, .kern: kern]
-        let unitAttr: [NSAttributedString.Key: Any] = [.font: font, .kern: kern]
-
-        func lineWidth(_ text: String) -> CGFloat {
-            let parts = text.split(separator: " ", maxSplits: 1)
-            let numStr = String(parts.first ?? "0")
-            let unitStr = parts.count > 1 ? String(parts[1]) : ""
-            let numW = (numStr as NSString).size(withAttributes: numAttr).width
-            let unitW = (unitStr as NSString).size(withAttributes: unitAttr).width
-            return numW + 1.5 + unitW
-        }
-
-        let maxW = max(lineWidth(uploadText), lineWidth(downloadText))
-        return NSSize(width: ceil(maxW + rightPad), height: lineH * 2)
+        let attr: [NSAttributedString.Key: Any] = [.font: font, .kern: kern]
+        let numW  = ("999.9" as NSString).size(withAttributes: attr).width
+        let unitW = ("MB/s"  as NSString).size(withAttributes: attr).width
+        return NSSize(width: ceil(numW + 1.5 + unitW + rightPad), height: 22)
     }
 
     override func draw(_ dirtyRect: NSRect) {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             super.draw(dirtyRect)
-            let primaryColor = NSColor.labelColor
+            // 深色外观使用更高亮纯白，浅色外观使用标准主文字色
+            let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            let primaryColor: NSColor = isDark ? NSColor(calibratedWhite: 0.98, alpha: 1.0) : .labelColor
 
             let attr: [NSAttributedString.Key: Any] = [
                 .font: font,
@@ -90,12 +80,13 @@ final class SpeedView: NSView {
                 .kern: kern,
             ]
 
-            drawLine(text: uploadText,   lineBottom: lineH, attr: attr, unitAttr: unitAttr)
-            drawLine(text: downloadText, lineBottom: 0,     attr: attr, unitAttr: unitAttr)
+            // 两行基线垂直下沉，彻底解决太往上偏的问题
+            drawLine(text: uploadText,   baselineY: bottomBaseline + lineSpacing, attr: attr, unitAttr: unitAttr)
+            drawLine(text: downloadText, baselineY: bottomBaseline,               attr: attr, unitAttr: unitAttr)
         }
     }
 
-    private func drawLine(text: String, lineBottom: CGFloat, attr: [NSAttributedString.Key: Any], unitAttr: [NSAttributedString.Key: Any]) {
+    private func drawLine(text: String, baselineY: CGFloat, attr: [NSAttributedString.Key: Any], unitAttr: [NSAttributedString.Key: Any]) {
         let parts = text.split(separator: " ", maxSplits: 1)
         let numStr = String(parts.first ?? "0")
         let unitStr = parts.count > 1 ? String(parts[1]) : ""
@@ -106,11 +97,10 @@ final class SpeedView: NSView {
         let totalW = numSize.width + gap + unitSize.width
 
         let x = self.bounds.width - totalW - rightPad
-        let baseline = lineBottom + baselineOffset
 
-        (numStr as NSString).draw(at: NSPoint(x: x, y: baseline), withAttributes: attr)
+        (numStr as NSString).draw(at: NSPoint(x: x, y: baselineY), withAttributes: attr)
         if !unitStr.isEmpty {
-            (unitStr as NSString).draw(at: NSPoint(x: x + numSize.width + gap, y: baseline), withAttributes: unitAttr)
+            (unitStr as NSString).draw(at: NSPoint(x: x + numSize.width + gap, y: baselineY), withAttributes: unitAttr)
         }
     }
 }
@@ -125,6 +115,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let trafficDashboard = TrafficDashboardViewController()
     private var localClickMonitor: Any?
     private var globalClickMonitor: Any?
+
+    // 无箭头、纯正 macOS 菜单级液态玻璃悬浮面板
     private lazy var trafficPanel: NSPanel = {
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 304, height: 498),
@@ -141,7 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.becomesKeyOnlyIfNeeded = true
         panel.level = .popUpMenu
         panel.collectionBehavior = [.canJoinAllSpaces, .transient, .fullScreenAuxiliary]
-        panel.animationBehavior = .utilityWindow
+        panel.animationBehavior = .default
         panel.isReleasedWhenClosed = false
         return panel
     }()
@@ -161,6 +153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSLayoutConstraint.activate([
             speedView.centerXAnchor.constraint(equalTo: statusButton.centerXAnchor),
             speedView.centerYAnchor.constraint(equalTo: statusButton.centerYAnchor),
+            speedView.heightAnchor.constraint(equalToConstant: 22)
         ])
         updateStatusItemLength()
 
@@ -173,7 +166,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         AppNetworkMonitor.shared.startMonitoring()
 
-        // Use RunLoop.main with mode .common so timer continues firing during menu interaction
         let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.updateDisplay()
         }
@@ -186,7 +178,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func updateDisplay() {
         let speed = monitor.readSpeed()
         speedView.set(upload: formatSpeed(speed.upload), download: formatSpeed(speed.download))
-        updateStatusItemLength()
         if trafficPanel.isVisible {
             trafficDashboard.updateContent()
         }
@@ -329,3 +320,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 }
+
+
