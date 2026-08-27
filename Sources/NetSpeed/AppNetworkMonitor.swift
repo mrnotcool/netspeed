@@ -197,15 +197,163 @@ final class AppNetworkMonitor {
         return nil
     }
 
+    private func appBundleURLs(at outerURL: URL) -> [URL] {
+        let fileManager = FileManager.default
+        var urls: [URL] = []
+
+        func appendIfNeeded(_ url: URL) {
+            let resolvedURL = url.resolvingSymlinksInPath().standardizedFileURL
+            guard resolvedURL.pathExtension.lowercased() == "app",
+                  fileManager.fileExists(atPath: resolvedURL.path),
+                  !urls.contains(where: { $0.path == resolvedURL.path }) else { return }
+            urls.append(resolvedURL)
+        }
+
+        // Mac App Store can wrap an iOS app inside either WrappedBundle or Wrapper/*.app.
+        let wrappedBundleURL = outerURL.appendingPathComponent("WrappedBundle")
+        appendIfNeeded(wrappedBundleURL)
+
+        let wrapperURL = outerURL.appendingPathComponent("Wrapper", isDirectory: true)
+        if let children = try? fileManager.contentsOfDirectory(
+            at: wrapperURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) {
+            for child in children where child.pathExtension.lowercased() == "app" {
+                appendIfNeeded(child)
+            }
+        }
+
+        appendIfNeeded(outerURL)
+        return urls
+    }
+
+    private func appInfoDictionary(at bundleURL: URL) -> [String: Any]? {
+        let infoURLs = [
+            bundleURL.appendingPathComponent("Contents/Info.plist"),
+            bundleURL.appendingPathComponent("Info.plist"),
+        ]
+
+        for infoURL in infoURLs {
+            guard let data = try? Data(contentsOf: infoURL),
+                  let propertyList = try? PropertyListSerialization.propertyList(from: data, format: nil),
+                  let dictionary = propertyList as? [String: Any] else { continue }
+            return dictionary
+        }
+        return nil
+    }
+
+    private func normalizedAppIdentity(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private func applicationNameMatches(_ appName: String, bundleURL: URL) -> Bool {
+        let target = normalizedAppIdentity(appName)
+        guard !target.isEmpty else { return false }
+
+        var identities = [bundleURL.deletingPathExtension().lastPathComponent]
+        if let info = appInfoDictionary(at: bundleURL) {
+            for key in ["CFBundleDisplayName", "CFBundleName", "CFBundleExecutable", "CFBundleIdentifier"] {
+                if let value = info[key] as? String {
+                    identities.append(value)
+                    if key == "CFBundleIdentifier", let lastComponent = value.split(separator: ".").last {
+                        identities.append(String(lastComponent))
+                    }
+                }
+            }
+        }
+
+        return identities.contains { identity in
+            let normalized = normalizedAppIdentity(identity)
+            return normalized == target || (isXiaohongshu(normalized) && isXiaohongshu(target))
+        }
+    }
+
+    private func declaredIconNames(in object: Any) -> [String] {
+        if let dictionary = object as? [String: Any] {
+            return dictionary.flatMap { key, value -> [String] in
+                var names: [String] = []
+                if key == "CFBundleIconName" || key.hasPrefix("CFBundleIconFile") {
+                    if let name = value as? String {
+                        names.append(name)
+                    } else if let values = value as? [String] {
+                        names.append(contentsOf: values)
+                    }
+                }
+                names.append(contentsOf: declaredIconNames(in: value))
+                return names
+            }
+        }
+        if let array = object as? [Any] {
+            return array.flatMap { declaredIconNames(in: $0) }
+        }
+        return []
+    }
+
+    private func declaredIcon(at bundleURL: URL) -> NSImage? {
+        guard let info = appInfoDictionary(at: bundleURL) else { return nil }
+        let resourceURLs = [
+            bundleURL.appendingPathComponent("Contents/Resources", isDirectory: true),
+            bundleURL.appendingPathComponent("Resources", isDirectory: true),
+            bundleURL,
+        ]
+
+        for declaredName in declaredIconNames(in: info) {
+            let name = (declaredName as NSString).deletingPathExtension
+            let originalExtension = (declaredName as NSString).pathExtension
+            var filenames: [String] = []
+            if !originalExtension.isEmpty {
+                filenames.append(declaredName)
+            } else {
+                filenames.append(contentsOf: [
+                    "\(name)@3x.png",
+                    "\(name)@2x.png",
+                    "\(name).png",
+                    "\(name).icns",
+                    name,
+                ])
+            }
+
+            for resourceURL in resourceURLs {
+                for filename in filenames {
+                    let iconURL = resourceURL.appendingPathComponent(filename)
+                    if let image = NSImage(contentsOf: iconURL) {
+                        return image
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    private func iconForApplication(at outerURL: URL) -> NSImage {
+        let bundleURLs = appBundleURLs(at: outerURL)
+        for bundleURL in bundleURLs {
+            if let icon = declaredIcon(at: bundleURL) {
+                return icon
+            }
+        }
+        return NSWorkspace.shared.icon(forFile: (bundleURLs.first ?? outerURL).path)
+    }
+
     func findAppIcon(appName: String, pid: Int32 = 0) -> NSImage {
         let lower = appName.lowercased()
 
-        // 1. Direct pid running app check
+        // 1. Executable path inspection, including nested Mac App Store app bundles.
+        if pid > 0, let execPath = getExecutablePath(pid: pid) {
+            let components = execPath.components(separatedBy: "/")
+            if let appIndex = components.firstIndex(where: { $0.hasSuffix(".app") }) {
+                let appPath = "/" + components[1...appIndex].joined(separator: "/")
+                return iconForApplication(at: URL(fileURLWithPath: appPath, isDirectory: true))
+            }
+        }
+
+        // 2. Direct pid running app check
         if pid > 0, let runningApp = NSRunningApplication(processIdentifier: pid), let icon = runningApp.icon {
             return icon
         }
         
-        // 2. Parent PID chain lookup
+        // 3. Parent PID chain lookup
         if pid > 0 {
             var currentPID = pid
             var depth = 0
@@ -216,15 +364,6 @@ final class AppNetworkMonitor {
                 guard let ppid = getParentPID(pid: currentPID) else { break }
                 currentPID = ppid
                 depth += 1
-            }
-        }
-        
-        // 3. Executable path inspection
-        if pid > 0, let execPath = getExecutablePath(pid: pid) {
-            let components = execPath.components(separatedBy: "/")
-            if let appIndex = components.firstIndex(where: { $0.hasSuffix(".app") }) {
-                let appPath = "/" + components[1...appIndex].joined(separator: "/")
-                return NSWorkspace.shared.icon(forFile: appPath)
             }
         }
         
@@ -240,18 +379,19 @@ final class AppNetworkMonitor {
             }
         }
         
-        // 5. Search /Applications, /System/Applications, ~/Applications for matching .app
+        // 5. Search common app folders, matching both filenames and bundle metadata.
         let fileManager = FileManager.default
         let searchDirs = ["/Applications", "/System/Applications", "/System/Applications/Utilities", "\(NSHomeDirectory())/Applications"]
         for dir in searchDirs {
             if let contents = try? fileManager.contentsOfDirectory(atPath: dir) {
                 for item in contents {
                     if item.hasSuffix(".app") {
-                        let nameWithoutExt = String(item.dropLast(4)).lowercased()
-                        let isMatch = (nameWithoutExt == lower) || (isXiaohongshu(lower) && isXiaohongshu(nameWithoutExt))
+                        let appURL = URL(fileURLWithPath: dir, isDirectory: true).appendingPathComponent(item, isDirectory: true)
+                        let isMatch = appBundleURLs(at: appURL).contains {
+                            applicationNameMatches(appName, bundleURL: $0)
+                        }
                         if isMatch {
-                            let fullPath = "\(dir)/\(item)"
-                            return NSWorkspace.shared.icon(forFile: fullPath)
+                            return iconForApplication(at: appURL)
                         }
                     }
                 }

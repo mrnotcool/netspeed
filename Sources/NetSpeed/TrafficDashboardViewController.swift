@@ -448,34 +448,34 @@ private final class TrafficBarChartView: NSView {
         super.draw(dirtyRect)
         guard !points.isEmpty else { return }
 
-        let dataRect = NSRect(x: 0, y: 18, width: bounds.width, height: bounds.height - 24)
-        let gridRect = NSRect(x: 0, y: dataRect.minY, width: bounds.width - 45, height: dataRect.height)
+        let axisLabelGutter: CGFloat = 45
+        let plotRect = NSRect(x: 0, y: 18, width: bounds.width - axisLabelGutter, height: bounds.height - 24)
         let rawMaximum = points.map(\.totalBytes).max() ?? 0
         let maximum = niceMaximum(max(rawMaximum, 1))
 
-        let slotWidth = dataRect.width / CGFloat(points.count)
+        let slotWidth = plotRect.width / CGFloat(points.count)
         let barWidth = range == .today ? min(6, slotWidth * 0.48) : min(5, slotWidth * 0.5)
-        let firstCenter = dataRect.minX + barWidth / 2
-        let lastCenter = dataRect.maxX - barWidth / 2
+        let firstCenter = plotRect.minX + barWidth / 2
+        let lastCenter = plotRect.maxX - barWidth / 2
         DashboardMetrics.accent.setFill()
 
         for (index, point) in points.enumerated() {
             let centerX: CGFloat
             if points.count == 1 {
-                centerX = dataRect.midX
+                centerX = plotRect.midX
             } else {
                 centerX = firstCenter
                     + (lastCenter - firstCenter) * CGFloat(index) / CGFloat(points.count - 1)
             }
             let ratio = CGFloat(Double(point.totalBytes) / Double(maximum))
-            let height = point.totalBytes == 0 ? 5 : max(5, dataRect.height * ratio)
-            let rect = NSRect(x: centerX - barWidth / 2, y: dataRect.minY, width: barWidth, height: height)
+            let height = point.totalBytes == 0 ? 5 : max(5, plotRect.height * ratio)
+            let rect = NSRect(x: centerX - barWidth / 2, y: plotRect.minY, width: barWidth, height: height)
             NSBezierPath(roundedRect: rect, xRadius: barWidth / 2, yRadius: barWidth / 2).fill()
         }
 
-        drawGridLine(y: gridRect.maxY, label: ByteFormatter.axis(maximum), in: gridRect)
-        drawGridLine(y: gridRect.midY, label: ByteFormatter.axis(maximum / 2), in: gridRect)
-        drawXAxis(in: dataRect)
+        drawGridLine(y: plotRect.maxY, label: ByteFormatter.axis(maximum), in: plotRect)
+        drawGridLine(y: plotRect.midY, label: ByteFormatter.axis(maximum / 2), in: plotRect)
+        drawXAxis(in: plotRect)
     }
 
     private func drawGridLine(y: CGFloat, label: String, in plotRect: NSRect) {

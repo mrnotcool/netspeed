@@ -74,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var globalClickMonitor: Any?
     private let statusItemLeftPadding: CGFloat = 4
     private let statusItemRightPadding: CGFloat = 1
+    private let statusItemVerticalOffset: CGFloat = -1.25
 
     // 无箭头、纯正 macOS 菜单级液态玻璃悬浮面板
     private lazy var trafficPanel: NSPanel = {
@@ -113,7 +114,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 equalTo: statusButton.trailingAnchor,
                 constant: -statusItemRightPadding
             ),
-            speedView.centerYAnchor.constraint(equalTo: statusButton.centerYAnchor),
+            speedView.centerYAnchor.constraint(
+                equalTo: statusButton.centerYAnchor,
+                constant: statusItemVerticalOffset
+            ),
         ])
         updateStatusItemLength()
 
