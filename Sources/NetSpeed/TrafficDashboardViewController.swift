@@ -190,8 +190,8 @@ private final class LiquidGlassBackgroundView: NSVisualEffectView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        // 使用与右键菜单相同的 .menu 材质，呈现清澈纯正的液态玻璃质感，而非浑浊的亚克力
-        material = .menu
+        // 使用 hudWindow 材质，大幅提升透明度与背景透视度，呈现轻盈通透的液态玻璃质感
+        material = .hudWindow
         blendingMode = .behindWindow
         state = .active
         // 使用 maskImage 确保 GPU 级别完美圆角，彻底根除 4 个角的三角形伪影
