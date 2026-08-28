@@ -5,7 +5,7 @@ private enum DashboardMetrics {
     static let height: CGFloat = 498
     static let horizontalInset: CGFloat = 13
     static let rowHeight: CGFloat = 22
-    static let rankingRowHeight: CGFloat = 32
+    static let rankingRowHeight: CGFloat = 24
     static let sectionSpacing: CGFloat = 16
     static let sectionContentSpacing: CGFloat = 6
     static let cornerRadius: CGFloat = 20   // macOS 26 style: larger squircle radius
@@ -121,7 +121,10 @@ final class TrafficDashboardViewController: NSViewController {
         let rankingStack = NSStackView(views: rankingRows)
         rankingStack.orientation = .vertical
         rankingStack.alignment = .leading
-        rankingStack.spacing = 0
+        // Keep the section's total height while moving each row's invisible
+        // trailing space between rows. The final row then ends at its visible
+        // content edge, so both 16pt section gaps look the same.
+        rankingStack.spacing = 10
         content.addArrangedSubview(rankingStack)
         content.setCustomSpacing(DashboardMetrics.sectionSpacing, after: rankingStack)
 
