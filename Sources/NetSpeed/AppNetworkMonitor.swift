@@ -35,13 +35,15 @@ final class AppNetworkMonitor {
     private var previousTime: Date = Date()
     private var isPolling = false
     
-    // App Name -> Real-time Speed (Bytes / sec)
+    // Stable Process Identity -> Real-time Speed (Bytes / sec)
     private(set) var realtimeSpeeds: [String: Double] = [:]
-    // App Name -> App Icon
+    // Stable Process Identity -> App Icon
     private(set) var appIcons: [String: NSImage] = [:]
-    // App Name -> Current Calendar Month Cumulative Bytes
+    // Stable Process Identity -> Display Name
+    private var identityDisplayNames: [String: String] = [:]
+    // Stable Process Identity -> Current Calendar Month Cumulative Bytes
     private(set) var monthlyUsage: [String: UInt64] = [:]
-    // App Name -> Today's Cumulative Bytes
+    // Stable Process Identity -> Today's Cumulative Bytes
     private(set) var dailyUsage: [String: UInt64] = [:]
     // Local hour start timestamp -> Cumulative Bytes
     private var hourlyUsage: [String: UInt64] = [:]
@@ -53,11 +55,10 @@ final class AppNetworkMonitor {
     private let dayStartDateKey = "NetSpeed_DayStartDate_V3"
     private let dailyUsageKey = "NetSpeed_DailyUsage_V3"
     private let hourlyUsageKey = "NetSpeed_HourlyUsage_V3"
+    private let identityDisplayNamesKey = "NetSpeed_IdentityDisplayNames_V1"
+    private let stableIdentityMigrationKey = "NetSpeed_StableIdentityMigration_V1"
     private let recalibratedKey = "NetSpeed_Recalibrated_V2"
     private let calendar = Calendar.autoupdatingCurrent
-    private let usageSaveInterval: TimeInterval = 15
-    private var usageDirty = false
-    private var lastUsageSaveDate = Date.distantPast
 
     private init() {
         loadUsage()
@@ -69,9 +70,7 @@ final class AppNetworkMonitor {
             defaults.set(true, forKey: recalibratedKey)
         }
 
-        if migrateWrappedApplicationUsage() {
-            saveUsage()
-        }
+        migrateLegacyV3UsageIfNeeded()
     }
     
     func startMonitoring() {
@@ -82,7 +81,7 @@ final class AppNetworkMonitor {
     func stopMonitoring() {
         timer?.invalidate()
         timer = nil
-        saveUsageIfNeeded(at: Date(), force: true)
+        saveUsage(includeIdentityMetadata: true)
     }
 
     func setDashboardVisible(_ isVisible: Bool) {
@@ -156,8 +155,7 @@ final class AppNetworkMonitor {
         var usage: [String: UInt64] = [:]
         for (name, value) in saved {
             guard let bytes = UInt64(value) else { continue }
-            let normalizedName = (name == "Browser Helper" || name == "Browser Helper (Renderer)") ? "Dia" : name
-            usage[normalizedName, default: 0] += bytes
+            usage[name, default: 0] += bytes
         }
         return usage
     }
@@ -166,6 +164,7 @@ final class AppNetworkMonitor {
         monthlyUsage = decodeUsage(forKey: monthlyUsageKey)
         dailyUsage = decodeUsage(forKey: dailyUsageKey)
         hourlyUsage = decodeUsage(forKey: hourlyUsageKey)
+        identityDisplayNames = defaults.dictionary(forKey: identityDisplayNamesKey) as? [String: String] ?? [:]
     }
 
     private func encodeUsage(_ usage: [String: UInt64], forKey key: String) {
@@ -176,18 +175,13 @@ final class AppNetworkMonitor {
         defaults.set(toSave, forKey: key)
     }
 
-    private func saveUsage() {
+    private func saveUsage(includeIdentityMetadata: Bool = false) {
         encodeUsage(monthlyUsage, forKey: monthlyUsageKey)
         encodeUsage(dailyUsage, forKey: dailyUsageKey)
         encodeUsage(hourlyUsage, forKey: hourlyUsageKey)
-        usageDirty = false
-        lastUsageSaveDate = Date()
-    }
-
-    private func saveUsageIfNeeded(at date: Date, force: Bool = false) {
-        guard usageDirty,
-              force || date.timeIntervalSince(lastUsageSaveDate) >= usageSaveInterval else { return }
-        saveUsage()
+        if includeIdentityMetadata {
+            defaults.set(identityDisplayNames, forKey: identityDisplayNamesKey)
+        }
     }
 
     private func hourKey(for date: Date) -> String {
@@ -203,24 +197,24 @@ final class AppNetworkMonitor {
         }
     }
 
-    private func migrateWrappedApplicationUsage() -> Bool {
-        let aliases = identityResolver.wrappedApplicationAliases()
-        guard !aliases.isEmpty else { return false }
-        var didChange = false
+    private func migrateLegacyV3UsageIfNeeded() {
+        guard !defaults.bool(forKey: stableIdentityMigrationKey) else { return }
 
-        func migrate(_ usage: inout [String: UInt64]) {
-            for existingName in Array(usage.keys) {
-                guard let displayName = aliases[identityResolver.normalize(existingName)],
-                      displayName != existingName,
-                      let bytes = usage.removeValue(forKey: existingName) else { continue }
-                usage[displayName, default: 0] += bytes
-                didChange = true
+        var aliasIndex = identityResolver.installedApplicationAliasIndex()
+        UsageIdentityMigration.addLegacyV3DiaAliases(to: &aliasIndex)
+        dailyUsage = UsageIdentityMigration.migrate(dailyUsage, using: aliasIndex)
+        monthlyUsage = UsageIdentityMigration.migrate(monthlyUsage, using: aliasIndex)
+
+        let persistedStableIDs = Set(dailyUsage.keys).union(monthlyUsage.keys)
+        for stableID in persistedStableIDs {
+            if let displayName = aliasIndex.displayNames[stableID] {
+                identityDisplayNames[stableID] = displayName
             }
         }
 
-        migrate(&dailyUsage)
-        migrate(&monthlyUsage)
-        return didChange
+        saveUsage(includeIdentityMetadata: true)
+        identityResolver.discardMigrationMetadataCaches()
+        defaults.set(true, forKey: stableIdentityMigrationKey)
     }
 
     func findAppIcon(appName: String, pid: Int32 = 0) -> NSImage {
@@ -232,22 +226,25 @@ final class AppNetworkMonitor {
     }
 
     private func mergePreviouslyRecordedSystemServices(_ processNames: Set<String>) -> Bool {
+        let systemServicesID = "system-services"
         var didChange = false
 
         for processName in processNames where processName != Self.systemServicesName {
             if let bytes = dailyUsage.removeValue(forKey: processName) {
-                dailyUsage[Self.systemServicesName, default: 0] += bytes
+                dailyUsage[systemServicesID, default: 0] += bytes
                 didChange = true
             }
             if let bytes = monthlyUsage.removeValue(forKey: processName) {
-                monthlyUsage[Self.systemServicesName, default: 0] += bytes
+                monthlyUsage[systemServicesID, default: 0] += bytes
                 didChange = true
             }
             appIcons.removeValue(forKey: processName)
+            identityDisplayNames.removeValue(forKey: processName)
         }
 
         if !processNames.isEmpty {
-            appIcons[Self.systemServicesName] = identityResolver.systemServicesIcon
+            appIcons[systemServicesID] = identityResolver.systemServicesIcon
+            identityDisplayNames[systemServicesID] = Self.systemServicesName
         }
         return didChange
     }
@@ -323,6 +320,7 @@ final class AppNetworkMonitor {
                     speedsByIdentity[identity.stableID, default: 0] += Double(deltaTotal) / elapsed
                     deltasByIdentity[identity.stableID, default: 0] += deltaTotal
                 }
+                self.identityResolver.retainProcessIdentities(for: Set(currentProcessBytes.keys))
 
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
@@ -331,12 +329,17 @@ final class AppNetworkMonitor {
                     self.previousTime = now
 
                     var currentRealtimeSpeeds: [String: Double] = [:]
-                    var deltasPerApp: [String: UInt64] = [:]
+                    var deltasPerIdentity: [String: UInt64] = [:]
                     var resolvedIcons: [String: NSImage] = [:]
+                    var metadataChanged = false
                     for (stableID, identity) in resolvedIdentities {
-                        currentRealtimeSpeeds[identity.displayName, default: 0] += speedsByIdentity[stableID, default: 0]
-                        deltasPerApp[identity.displayName, default: 0] += deltasByIdentity[stableID, default: 0]
-                        resolvedIcons[identity.displayName] = identity.icon
+                        currentRealtimeSpeeds[stableID, default: 0] += speedsByIdentity[stableID, default: 0]
+                        deltasPerIdentity[stableID, default: 0] += deltasByIdentity[stableID, default: 0]
+                        resolvedIcons[stableID] = identity.icon
+                        if self.identityDisplayNames[stableID] != identity.displayName {
+                            self.identityDisplayNames[stableID] = identity.displayName
+                            metadataChanged = true
+                        }
                     }
                     self.realtimeSpeeds = currentRealtimeSpeeds
 
@@ -349,18 +352,19 @@ final class AppNetworkMonitor {
                     )
 
                     var updatedUsage = false
-                    for (appName, delta) in deltasPerApp where delta > 0 {
-                        self.dailyUsage[appName, default: 0] += delta
-                        self.monthlyUsage[appName, default: 0] += delta
+                    for (stableID, delta) in deltasPerIdentity where delta > 0 {
+                        self.dailyUsage[stableID, default: 0] += delta
+                        self.monthlyUsage[stableID, default: 0] += delta
                         updatedUsage = true
                     }
                     if updatedUsage {
-                        let totalDelta = deltasPerApp.values.reduce(UInt64(0), +)
+                        let totalDelta = deltasPerIdentity.values.reduce(UInt64(0), +)
                         self.hourlyUsage[self.hourKey(for: now), default: 0] += totalDelta
                     }
-                    if updatedUsage || migratedSystemServices {
-                        self.usageDirty = true
-                        self.saveUsageIfNeeded(at: now)
+                    if updatedUsage || migratedSystemServices || metadataChanged {
+                        self.saveUsage(
+                            includeIdentityMetadata: migratedSystemServices || metadataChanged
+                        )
                     }
                     self.isPolling = false
                 }
@@ -372,8 +376,9 @@ final class AppNetworkMonitor {
     
     func topRealtimeApps(limit: Int = 5) -> [AppSpeedInfo] {
         let sorted = realtimeSpeeds.map { (name, speed) in
-            let icon = appIcons[name] ?? findAppIcon(appName: name)
-            return AppSpeedInfo(name: name, icon: icon, bytesPerSec: speed)
+            let displayName = identityDisplayNames[name] ?? name
+            let icon = appIcons[name] ?? findAppIcon(appName: displayName)
+            return AppSpeedInfo(name: displayName, icon: icon, bytesPerSec: speed)
         }.sorted { $0.bytesPerSec > $1.bytesPerSec }
         
         return Array(sorted.prefix(limit))
@@ -387,8 +392,9 @@ final class AppNetworkMonitor {
         checkAndResetCycles()
         let source = range == .today ? dailyUsage : monthlyUsage
         let sorted = source.map { (name, total) in
-            let icon = appIcons[name] ?? findAppIcon(appName: name)
-            return AppTrafficInfo(name: name, icon: icon, totalBytes: total)
+            let displayName = identityDisplayNames[name] ?? name
+            let icon = appIcons[name] ?? findAppIcon(appName: displayName)
+            return AppTrafficInfo(name: displayName, icon: icon, totalBytes: total)
         }.sorted { $0.totalBytes > $1.totalBytes }
 
         return Array(sorted.prefix(limit))

@@ -9,6 +9,10 @@ let package = Package(
             name: "NetSpeed",
             dependencies: [],
             exclude: ["SF-Compact-Display-Medium.otf"]
-        )
+        ),
+        .testTarget(
+            name: "NetSpeedTests",
+            dependencies: ["NetSpeed"]
+        ),
     ]
 )

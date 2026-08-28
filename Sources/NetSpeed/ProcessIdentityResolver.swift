@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import Darwin
+import UniformTypeIdentifiers
 
 struct ProcessIdentity {
     enum Category {
@@ -18,6 +19,13 @@ struct ProcessIdentity {
 }
 
 final class ProcessIdentityResolver {
+    private struct CachedProcessIdentity {
+        let startSeconds: UInt64
+        let startMicroseconds: UInt64
+        let rawName: String
+        let identity: ProcessIdentity
+    }
+
     static let systemServicesDisplayName = "System Services"
 
     private static let systemServicePathPrefixes = [
@@ -43,16 +51,46 @@ final class ProcessIdentityResolver {
     private var appInfoCache: [String: [String: Any]] = [:]
     private var missingAppInfoPaths: Set<String> = []
     private var applicationIconCache: [String: NSImage] = [:]
-    private var wrappedAliasesCache: [String: String]?
+    private var namedIconCache: [String: NSImage] = [:]
+    private var processIdentityCache: [Int32: CachedProcessIdentity] = [:]
 
     func resolve(pid: Int32, rawName: String) -> ProcessIdentity {
+        let processInfo = getProcessInfo(pid: pid).flatMap { info in
+            (info.pbi_start_tvsec == 0 && info.pbi_start_tvusec == 0) ? nil : info
+        }
+        if let processInfo {
+            cacheLock.lock()
+            if let cached = processIdentityCache[pid],
+               cached.startSeconds == processInfo.pbi_start_tvsec,
+               cached.startMicroseconds == processInfo.pbi_start_tvusec,
+               cached.rawName == rawName {
+                cacheLock.unlock()
+                return cached.identity
+            }
+            cacheLock.unlock()
+        }
+
+        func cache(_ identity: ProcessIdentity) -> ProcessIdentity {
+            guard let processInfo else { return identity }
+            let cached = CachedProcessIdentity(
+                startSeconds: processInfo.pbi_start_tvsec,
+                startMicroseconds: processInfo.pbi_start_tvusec,
+                rawName: rawName,
+                identity: identity
+            )
+            cacheLock.lock()
+            processIdentityCache[pid] = cached
+            cacheLock.unlock()
+            return identity
+        }
+
         let executablePath = getExecutablePath(pid: pid)
 
         // Prefer the bundle that directly owns the executable. This also resolves
         // Mac App Store iOS wrappers to their embedded application bundle.
         if let executablePath,
-           let bundleURL = applicationBundleURL(containingExecutableAt: executablePath) {
-            return applicationIdentity(bundleURL: bundleURL)
+           let bundleURL = Self.owningApplicationBundleURL(containingExecutableAt: executablePath) {
+            return cache(applicationIdentity(bundleURL: bundleURL))
         }
 
         // Helper processes commonly inherit their public identity from a parent app.
@@ -61,18 +99,17 @@ final class ProcessIdentityResolver {
         while depth < 5 && currentPID > 1 {
             if let runningApp = NSRunningApplication(processIdentifier: currentPID) {
                 if let outerURL = runningApp.bundleURL {
-                    return applicationIdentity(bundleURL: applicationIdentityBundleURL(at: outerURL))
+                    return cache(applicationIdentity(bundleURL: applicationIdentityBundleURL(at: outerURL)))
                 }
                 if let localizedName = runningApp.localizedName, !localizedName.isEmpty {
-                    let displayName = canonicalDisplayName(localizedName)
-                    return ProcessIdentity(
-                        stableID: "process:\(normalize(displayName))",
-                        displayName: displayName,
-                        icon: runningApp.icon ?? icon(appName: displayName, pid: currentPID),
+                    return cache(ProcessIdentity(
+                        stableID: "process:\(normalize(localizedName))",
+                        displayName: localizedName,
+                        icon: runningApp.icon ?? icon(appName: localizedName, pid: currentPID),
                         bundleURL: nil,
-                        aliases: [localizedName, displayName],
+                        aliases: [localizedName],
                         category: .executable
-                    )
+                    ))
                 }
             }
             guard let parentPID = getParentPID(pid: currentPID), parentPID > 1 else { break }
@@ -81,25 +118,30 @@ final class ProcessIdentityResolver {
         }
 
         if let executablePath, isSystemServiceExecutable(at: executablePath) {
-            return ProcessIdentity(
+            return cache(ProcessIdentity(
                 stableID: "system-services",
                 displayName: Self.systemServicesDisplayName,
                 icon: systemServicesIcon,
                 bundleURL: nil,
                 aliases: [rawName, Self.systemServicesDisplayName],
                 category: .systemServices
-            )
+            ))
         }
 
-        let displayName = canonicalDisplayName(rawName)
-        return ProcessIdentity(
-            stableID: "process:\(normalize(displayName))",
-            displayName: displayName,
-            icon: icon(appName: displayName, pid: pid),
+        return cache(ProcessIdentity(
+            stableID: "process:\(normalize(rawName))",
+            displayName: rawName,
+            icon: icon(appName: rawName, pid: pid),
             bundleURL: nil,
-            aliases: [rawName, displayName],
+            aliases: [rawName],
             category: .executable
-        )
+        ))
+    }
+
+    func retainProcessIdentities(for processIDs: Set<Int32>) {
+        cacheLock.lock()
+        processIdentityCache = processIdentityCache.filter { processIDs.contains($0.key) }
+        cacheLock.unlock()
     }
 
     func icon(appName: String, pid: Int32 = 0) -> NSImage {
@@ -109,7 +151,7 @@ final class ProcessIdentityResolver {
 
         if pid > 0,
            let executablePath = getExecutablePath(pid: pid),
-           let bundleURL = applicationBundleURL(containingExecutableAt: executablePath) {
+           let bundleURL = Self.owningApplicationBundleURL(containingExecutableAt: executablePath) {
             return iconForApplication(at: bundleURL)
         }
 
@@ -134,11 +176,25 @@ final class ProcessIdentityResolver {
         }
 
         let targetName = normalize(appName)
+        cacheLock.lock()
+        if let cached = namedIconCache[targetName] {
+            cacheLock.unlock()
+            return cached
+        }
+        cacheLock.unlock()
+
+        func cacheNamedIcon(_ icon: NSImage) -> NSImage {
+            cacheLock.lock()
+            namedIconCache[targetName] = icon
+            cacheLock.unlock()
+            return icon
+        }
+
         for runningApp in NSWorkspace.shared.runningApplications {
             if let localizedName = runningApp.localizedName,
                normalize(localizedName) == targetName,
                let icon = runningApp.icon {
-                return icon
+                return cacheNamedIcon(icon)
             }
         }
 
@@ -153,25 +209,23 @@ final class ProcessIdentityResolver {
                 if appBundleURLs(at: outerURL).contains(where: {
                     applicationNameMatches(appName, bundleURL: $0)
                 }) {
-                    return iconForApplication(at: outerURL)
+                    return cacheNamedIcon(iconForApplication(at: outerURL))
                 }
             }
         }
 
-        return genericExecutableIcon
+        return cacheNamedIcon(genericExecutableIcon)
     }
 
-    func wrappedApplicationAliases() -> [String: String] {
-        cacheLock.lock()
-        if let cached = wrappedAliasesCache {
-            cacheLock.unlock()
-            return cached
-        }
-        cacheLock.unlock()
+    func installedApplicationAliasIndex() -> IdentityAliasIndex {
+        var index = IdentityAliasIndex()
+        index.add(
+            stableID: "system-services",
+            displayName: Self.systemServicesDisplayName,
+            aliases: [Self.systemServicesDisplayName]
+        )
 
-        var aliases: [String: String] = [:]
-
-        for directory in applicationSearchDirectories(includeSystemApplications: false) {
+        for directory in applicationSearchDirectories() {
             guard let children = try? FileManager.default.contentsOfDirectory(
                 at: directory,
                 includingPropertiesForKeys: nil,
@@ -179,33 +233,34 @@ final class ProcessIdentityResolver {
             ) else { continue }
 
             for outerURL in children where outerURL.pathExtension.lowercased() == "app" {
-                for bundleURL in appBundleURLs(at: outerURL)
-                    where bundleURL.path != outerURL.path && isIOSApplicationBundle(at: bundleURL) {
-                    // Startup migration only needs metadata. Avoid decoding every
-                    // wrapped app icon just to construct its historical aliases.
-                    let displayName = applicationDisplayName(at: bundleURL)
-                    let bundleAliases = applicationAliases(at: bundleURL).union([
-                        outerURL.deletingPathExtension().lastPathComponent,
-                    ])
-                    for alias in bundleAliases {
-                        aliases[normalize(alias)] = displayName
-                    }
-                }
+                let identityURL = applicationIdentityBundleURL(at: outerURL)
+                let info = appInfoDictionary(at: identityURL)
+                let bundleIdentifier = info?["CFBundleIdentifier"] as? String
+                let stableID = Self.stableID(
+                    bundleIdentifier: bundleIdentifier,
+                    bundleURL: identityURL
+                )
+                let displayName = applicationDisplayName(at: identityURL)
+                let aliases = applicationAliases(at: identityURL)
+                    .union(applicationAliases(at: outerURL))
+                    .union([outerURL.deletingPathExtension().lastPathComponent])
+                index.add(stableID: stableID, displayName: displayName, aliases: aliases)
             }
         }
 
-        cacheLock.lock()
-        if let cached = wrappedAliasesCache {
-            cacheLock.unlock()
-            return cached
-        }
-        wrappedAliasesCache = aliases
-        cacheLock.unlock()
-        return aliases
+        return index
     }
 
-    func normalize(_ value: String) -> String {
-        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    func discardMigrationMetadataCaches() {
+        cacheLock.lock()
+        bundleURLCache.removeAll(keepingCapacity: false)
+        appInfoCache.removeAll(keepingCapacity: false)
+        missingAppInfoPaths.removeAll(keepingCapacity: false)
+        cacheLock.unlock()
+    }
+
+    private func normalize(_ value: String) -> String {
+        IdentityAliasIndex.normalize(value)
     }
 
     private func applicationIdentity(bundleURL: URL) -> ProcessIdentity {
@@ -222,8 +277,7 @@ final class ProcessIdentityResolver {
         let displayName = applicationDisplayName(at: identityURL)
         let info = appInfoDictionary(at: identityURL)
         let bundleIdentifier = info?["CFBundleIdentifier"] as? String
-        let stableID = bundleIdentifier.map { "bundle:\($0.lowercased())" }
-            ?? "bundle-path:\(identityURL.standardizedFileURL.path.lowercased())"
+        let stableID = Self.stableID(bundleIdentifier: bundleIdentifier, bundleURL: identityURL)
 
         let identity = ProcessIdentity(
             stableID: stableID,
@@ -244,20 +298,15 @@ final class ProcessIdentityResolver {
         return identity
     }
 
-    private func canonicalDisplayName(_ name: String) -> String {
-        switch name {
-        case "Browser Helper", "Browser Helper (Renderer)":
-            return "Dia"
-        default:
-            return name
-        }
-    }
-
-    private func getParentPID(pid: Int32) -> Int32? {
+    private func getProcessInfo(pid: Int32) -> proc_bsdinfo? {
         var info = proc_bsdinfo()
         let size = MemoryLayout<proc_bsdinfo>.size
         let result = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, Int32(size))
-        return result == size ? Int32(info.pbi_ppid) : nil
+        return result == size ? info : nil
+    }
+
+    private func getParentPID(pid: Int32) -> Int32? {
+        getProcessInfo(pid: pid).map { Int32($0.pbi_ppid) }
     }
 
     private func getExecutablePath(pid: Int32) -> String? {
@@ -272,7 +321,7 @@ final class ProcessIdentityResolver {
         return Self.systemServicePathPrefixes.contains { standardizedPath.hasPrefix($0) }
     }
 
-    private func applicationBundleURL(containingExecutableAt path: String) -> URL? {
+    static func owningApplicationBundleURL(containingExecutableAt path: String) -> URL? {
         let components = path.components(separatedBy: "/")
         let appIndices = components.indices.filter {
             components[$0].lowercased().hasSuffix(".app")
@@ -287,6 +336,13 @@ final class ProcessIdentityResolver {
 
         let appPath = "/" + components[1...identityIndex].joined(separator: "/")
         return URL(fileURLWithPath: appPath, isDirectory: true)
+    }
+
+    static func stableID(bundleIdentifier: String?, bundleURL: URL) -> String {
+        if let bundleIdentifier, !bundleIdentifier.isEmpty {
+            return "bundle:\(bundleIdentifier.lowercased())"
+        }
+        return "bundle-path:\(bundleURL.standardizedFileURL.path.lowercased())"
     }
 
     private func applicationIdentityBundleURL(at outerURL: URL) -> URL {
@@ -334,11 +390,13 @@ final class ProcessIdentityResolver {
         return aliases
     }
 
-    private func applicationSearchDirectories(includeSystemApplications: Bool = true) -> [URL] {
-        var paths = ["/Applications", "\(NSHomeDirectory())/Applications"]
-        if includeSystemApplications {
-            paths.insert(contentsOf: ["/System/Applications", "/System/Applications/Utilities"], at: 1)
-        }
+    private func applicationSearchDirectories() -> [URL] {
+        let paths = [
+            "/Applications",
+            "/System/Applications",
+            "/System/Applications/Utilities",
+            "\(NSHomeDirectory())/Applications",
+        ]
         return paths.map { URL(fileURLWithPath: $0, isDirectory: true) }
     }
 
@@ -552,8 +610,6 @@ final class ProcessIdentityResolver {
             return symbolImage.withSymbolConfiguration(.init(pointSize: 16, weight: .regular)) ?? symbolImage
         }
 
-        return NSWorkspace.shared.icon(
-            forFileType: NSFileTypeForHFSTypeCode(OSType(kGenericApplicationIcon))
-        )
+        return NSWorkspace.shared.icon(for: .unixExecutable)
     }
 }
