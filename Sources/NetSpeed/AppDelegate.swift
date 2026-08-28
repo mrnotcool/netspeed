@@ -28,6 +28,7 @@ final class SpeedView: NSView {
     }
 
     func set(upload: String, download: String) {
+        guard upload != uploadText || download != downloadText else { return }
         uploadText = upload
         downloadText = download
         needsDisplay = true
@@ -186,6 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         trafficDashboard.updateContent()
         positionTrafficPanel()
         trafficPanel.orderFrontRegardless()
+        AppNetworkMonitor.shared.setDashboardVisible(true)
         installDismissMonitors()
     }
 
@@ -227,6 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func hideTrafficPanel() {
         trafficPanel.orderOut(nil)
+        AppNetworkMonitor.shared.setDashboardVisible(false)
         removeDismissMonitors()
     }
 
