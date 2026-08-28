@@ -7,8 +7,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "NetSpeed",
-            dependencies: [],
-            exclude: ["SF-Compact-Display-Medium.otf"]
+            dependencies: []
         ),
         .testTarget(
             name: "NetSpeedTests",
