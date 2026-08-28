@@ -2,7 +2,7 @@
 
 一个轻量级的 macOS 菜单栏网络监控工具，实时显示整体网速、各 App 实时网速榜单，以及今日和本月流量统计。
 
-![screenshot](screenshot.png)
+![NetSpeed 流量面板](screenshot.png?v=20260828-114436)
 
 ![Swift](https://img.shields.io/badge/Swift-5.7-orange) ![macOS](https://img.shields.io/badge/macOS-11.0%2B-blue)
 
