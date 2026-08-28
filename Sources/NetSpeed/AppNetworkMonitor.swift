@@ -26,6 +26,25 @@ struct TrafficChartPoint {
 
 final class AppNetworkMonitor {
     static let shared = AppNetworkMonitor()
+
+    private static let systemServicesName = "System Services"
+    private static let systemServicePathPrefixes = [
+        "/usr/libexec/",
+        "/usr/sbin/",
+        "/System/Library/",
+        "/System/Cryptexes/App/usr/libexec/",
+        "/System/Cryptexes/App/System/Library/",
+        "/Library/Apple/System/Library/",
+    ]
+
+    private let systemServicesIcon = AppNetworkMonitor.coreTypesIcon(
+        named: "ToolbarCustomizeIcon.icns",
+        fallbackSymbolName: "wrench.and.screwdriver.fill"
+    )
+    private let genericExecutableIcon = AppNetworkMonitor.coreTypesIcon(
+        named: "ExecutableBinaryIcon.icns",
+        fallbackSymbolName: "terminal"
+    )
     
     private var timer: Timer?
     private var previousProcessBytes: [Int32: (inBytes: UInt64, outBytes: UInt64)] = [:]
@@ -52,6 +71,22 @@ final class AppNetworkMonitor {
     private let hourlyUsageKey = "NetSpeed_HourlyUsage_V3"
     private let recalibratedKey = "NetSpeed_Recalibrated_V2"
     private let calendar = Calendar.autoupdatingCurrent
+
+    private static func coreTypesIcon(named filename: String, fallbackSymbolName: String) -> NSImage {
+        let path = "/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/\(filename)"
+        if let image = NSImage(contentsOfFile: path) {
+            return image
+        }
+
+        if #available(macOS 11.0, *),
+           let symbolImage = NSImage(systemSymbolName: fallbackSymbolName, accessibilityDescription: nil) {
+            return symbolImage.withSymbolConfiguration(.init(pointSize: 16, weight: .regular)) ?? symbolImage
+        }
+
+        return NSWorkspace.shared.icon(
+            forFileType: NSFileTypeForHFSTypeCode(OSType(kGenericApplicationIcon))
+        )
+    }
     
     private init() {
         loadUsage()
@@ -197,6 +232,11 @@ final class AppNetworkMonitor {
         return nil
     }
 
+    private func isSystemServiceExecutable(at path: String) -> Bool {
+        let standardizedPath = URL(fileURLWithPath: path).standardizedFileURL.path
+        return Self.systemServicePathPrefixes.contains { standardizedPath.hasPrefix($0) }
+    }
+
     private func appBundleURLs(at outerURL: URL) -> [URL] {
         let fileManager = FileManager.default
         var urls: [URL] = []
@@ -339,6 +379,10 @@ final class AppNetworkMonitor {
     func findAppIcon(appName: String, pid: Int32 = 0) -> NSImage {
         let lower = appName.lowercased()
 
+        if appName == Self.systemServicesName {
+            return systemServicesIcon
+        }
+
         // 1. Executable path inspection, including nested Mac App Store app bundles.
         if pid > 0, let execPath = getExecutablePath(pid: pid) {
             let components = execPath.components(separatedBy: "/")
@@ -398,36 +442,9 @@ final class AppNetworkMonitor {
             }
         }
         
-        // 6. Match Surge's app-like treatment for background system processes.
-        if lower == "node" {
-            let terminalPaths = [
-                "/System/Applications/Utilities/Terminal.app",
-                "/Applications/Utilities/Terminal.app",
-            ]
-            if let terminalPath = terminalPaths.first(where: { fileManager.fileExists(atPath: $0) }) {
-                return NSWorkspace.shared.icon(forFile: terminalPath)
-            }
-        }
-
-        let symbolName: String
-        if lower.contains("node") || lower.contains("zsh") || lower.contains("bash") || lower.contains("python") || lower.contains("server") {
-            symbolName = "terminal"
-        } else {
-            let settingsPaths = [
-                "/System/Applications/System Settings.app",
-                "/System/Applications/System Preferences.app",
-            ]
-            if let settingsPath = settingsPaths.first(where: { fileManager.fileExists(atPath: $0) }) {
-                return NSWorkspace.shared.icon(forFile: settingsPath)
-            }
-            symbolName = "gearshape.fill"
-        }
-        
-        if #available(macOS 11.0, *), let symbolImage = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) {
-            return symbolImage.withSymbolConfiguration(.init(pointSize: 16, weight: .regular)) ?? symbolImage
-        }
-        
-        return NSWorkspace.shared.icon(forFileType: NSFileTypeForHFSTypeCode(OSType(kGenericApplicationIcon)))
+        // Match Surge's treatment for unmatched command-line executables without
+        // making them look like Terminal or System Settings.
+        return genericExecutableIcon
     }
 
     private func resolveAppInfo(pid: Int32, rawName: String) -> (name: String, icon: NSImage?) {
@@ -457,10 +474,37 @@ final class AppNetworkMonitor {
             currentPID = ppid
             depth += 1
         }
+
+        // 3. Aggregate Apple background daemons that do not belong to an app.
+        // This mirrors Surge's "System Services" traffic-statistics bucket.
+        if let execPath = getExecutablePath(pid: pid), isSystemServiceExecutable(at: execPath) {
+            return (Self.systemServicesName, systemServicesIcon)
+        }
         
         let name = (rawName == "Browser Helper" || rawName == "Browser Helper (Renderer)") ? "Dia" : rawName
         let icon = findAppIcon(appName: name, pid: pid)
         return (name, icon)
+    }
+
+    private func mergePreviouslyRecordedSystemServices(_ processNames: Set<String>) -> Bool {
+        var didChange = false
+
+        for processName in processNames where processName != Self.systemServicesName {
+            if let bytes = dailyUsage.removeValue(forKey: processName) {
+                dailyUsage[Self.systemServicesName, default: 0] += bytes
+                didChange = true
+            }
+            if let bytes = monthlyUsage.removeValue(forKey: processName) {
+                monthlyUsage[Self.systemServicesName, default: 0] += bytes
+                didChange = true
+            }
+            appIcons.removeValue(forKey: processName)
+        }
+
+        if !processNames.isEmpty {
+            appIcons[Self.systemServicesName] = systemServicesIcon
+        }
+        return didChange
     }
     
     private func pollNettopAsync() {
@@ -499,6 +543,7 @@ final class AppNetworkMonitor {
                 var currentRealtimeSpeeds: [String: Double] = [:]
                 var deltasPerApp: [String: UInt64] = [:]
                 var resolvedIcons: [String: NSImage] = [:]
+                var systemServiceProcessNames: Set<String> = []
                 
                 let lines = output.components(separatedBy: .newlines)
                 for line in lines {
@@ -536,6 +581,9 @@ final class AppNetworkMonitor {
                                 }
                                 
                                 let (appName, appIcon) = self.resolveAppInfo(pid: pid, rawName: rawName)
+                                if appName == Self.systemServicesName {
+                                    systemServiceProcessNames.insert(rawName)
+                                }
                                 if let appIcon = appIcon {
                                     resolvedIcons[appName] = appIcon
                                 }
@@ -560,6 +608,10 @@ final class AppNetworkMonitor {
                             self.appIcons[k] = v
                         }
                     }
+
+                    let migratedSystemServices = self.mergePreviouslyRecordedSystemServices(
+                        systemServiceProcessNames
+                    )
                     
                     var updatedUsage = false
                     for (appName, delta) in deltasPerApp {
@@ -572,6 +624,8 @@ final class AppNetworkMonitor {
                     if updatedUsage {
                         let totalDelta = deltasPerApp.values.reduce(UInt64(0), +)
                         self.hourlyUsage[self.hourKey(for: now), default: 0] += totalDelta
+                    }
+                    if updatedUsage || migratedSystemServices {
                         self.saveUsage()
                     }
                     self.isPolling = false

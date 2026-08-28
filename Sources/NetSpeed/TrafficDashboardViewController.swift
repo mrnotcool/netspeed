@@ -6,6 +6,8 @@ private enum DashboardMetrics {
     static let horizontalInset: CGFloat = 13
     static let rowHeight: CGFloat = 22
     static let rankingRowHeight: CGFloat = 32
+    static let sectionSpacing: CGFloat = 16
+    static let sectionContentSpacing: CGFloat = 6
     static let cornerRadius: CGFloat = 20   // macOS 26 style: larger squircle radius
     static let accent = NSColor(calibratedRed: 0.02, green: 0.72, blue: 0.84, alpha: 1)
 }
@@ -101,6 +103,7 @@ final class TrafficDashboardViewController: NSViewController {
             rangeControl.heightAnchor.constraint(equalToConstant: 22),
         ])
         content.addArrangedSubview(trafficHeader)
+        content.setCustomSpacing(DashboardMetrics.sectionContentSpacing, after: trafficHeader)
 
         chartView.translatesAutoresizingMaskIntoConstraints = false
         content.addArrangedSubview(chartView)
@@ -108,24 +111,24 @@ final class TrafficDashboardViewController: NSViewController {
             chartView.widthAnchor.constraint(equalToConstant: DashboardMetrics.width - DashboardMetrics.horizontalInset * 2),
             chartView.heightAnchor.constraint(equalToConstant: 88),
         ])
-        content.setCustomSpacing(14, after: chartView)
+        content.setCustomSpacing(DashboardMetrics.sectionSpacing, after: chartView)
 
         // 2. 进程与应用（累计流量排行）
         let rankingTitle = makeLabel("进程与应用", size: 11.5, weight: .semibold, color: .secondaryLabelColor)
         content.addArrangedSubview(rankingTitle)
-        content.setCustomSpacing(8, after: rankingTitle)
+        content.setCustomSpacing(DashboardMetrics.sectionContentSpacing, after: rankingTitle)
 
         let rankingStack = NSStackView(views: rankingRows)
         rankingStack.orientation = .vertical
         rankingStack.alignment = .leading
         rankingStack.spacing = 0
         content.addArrangedSubview(rankingStack)
-        content.setCustomSpacing(18, after: rankingStack)
+        content.setCustomSpacing(DashboardMetrics.sectionSpacing, after: rankingStack)
 
-        // 3. 进程与客户端（实时网速，纯留白间隔无分割线）
-        let realtimeTitle = makeLabel("进程与客户端", size: 11.5, weight: .semibold, color: .secondaryLabelColor)
+        // 3. 实时进程（实时网速，纯留白间隔无分割线）
+        let realtimeTitle = makeLabel("实时进程", size: 11.5, weight: .semibold, color: .secondaryLabelColor)
         content.addArrangedSubview(realtimeTitle)
-        content.setCustomSpacing(6, after: realtimeTitle)
+        content.setCustomSpacing(DashboardMetrics.sectionContentSpacing, after: realtimeTitle)
 
         let realtimeStack = NSStackView(views: realtimeRows)
         realtimeStack.orientation = .vertical
